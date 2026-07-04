@@ -1,0 +1,19 @@
+{
+  "name": "isword",
+  "version": "0.1.0",
+  "description": "Phone-controlled sword fighting game. Swing your phone, fight in 3D on a TV.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.0"
+  },
+  "license": "MIT"
+}

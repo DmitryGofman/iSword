@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>iSword — Controller</title>
+  <link rel="icon" href="/favicon.svg" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <style>
+    .status-row { margin-top: 4px; }
+    #joinPanel, #playPanel { width: min(420px, 92vw); }
+    #playPanel { display: none; }
+    .field { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+    .field input {
+      font-size: 34px; letter-spacing: 12px; text-align: center; text-transform: uppercase;
+      padding: 14px; border-radius: 12px; border: 1px solid var(--border);
+      background: rgba(0,0,0,0.3); color: var(--gold); font-weight: 800;
+      width: 100%;
+    }
+    .swingviz {
+      position: relative; width: 220px; height: 220px; margin: 6px auto;
+      border-radius: 50%; border: 1px solid var(--border);
+      background: radial-gradient(circle at 50% 40%, rgba(92,200,255,0.10), rgba(0,0,0,0.25));
+    }
+    .swingviz .hilt {
+      position: absolute; left: 50%; top: 50%; width: 8px; height: 96px;
+      margin-left: -4px; margin-top: -78px; border-radius: 4px;
+      background: linear-gradient(180deg, #eaf6ff, #5cc8ff);
+      transform-origin: 50% 82%;
+      box-shadow: 0 0 18px rgba(92,200,255,0.5);
+    }
+    .speedbar { width: 100%; height: 12px; border-radius: 8px; background: rgba(0,0,0,0.3); overflow: hidden; border: 1px solid var(--border); }
+    .speedbar > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--ok), var(--gold), var(--accent2)); transition: width .06s linear; }
+    .hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="brand" style="font-size: clamp(30px,10vw,56px)">i<span class="blade">Sword</span></h1>
+
+    <!-- Join -->
+    <div class="card" id="joinPanel">
+      <div class="field">
+        <label class="muted">Room code (shown on the TV)</label>
+        <input id="codeInput" inputmode="latin" autocomplete="off" maxlength="4" placeholder="····" />
+      </div>
+      <div style="height:14px"></div>
+      <button class="btn big" id="enableBtn">Enable Motion &amp; Join</button>
+      <p class="hint" style="margin-top:12px">On iPhone you'll be asked to allow Motion &amp; Orientation access — tap Allow.</p>
+    </div>
+
+    <!-- Play -->
+    <div class="card" id="playPanel">
+      <div class="row status-row">
+        <span class="pill"><span class="dot" id="connDot"></span> <span id="connText">connecting…</span></span>
+      </div>
+      <div class="swingviz"><div class="hilt" id="hilt"></div></div>
+      <div class="muted" style="margin:2px 0 8px">swing speed</div>
+      <div class="speedbar"><i id="speedFill"></i></div>
+      <div style="height:16px"></div>
+      <button class="btn big" id="calBtn">Hold still &amp; Calibrate</button>
+      <p class="hint" style="margin-top:12px">
+        Hold the phone like a sword grip, blade pointing up.<br/>
+        Tap <b>Calibrate</b> to set your neutral stance, then swing!
+      </p>
+    </div>
+
+    <p class="muted" id="err" style="color:var(--accent2)"></p>
+  </div>
+
+  <script type="module" src="/js/controller.js"></script>
+</body>
+</html>

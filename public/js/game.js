@@ -807,8 +807,10 @@ function setPair(connected) {
 function setupNetworked() {
   roomCode = makeRoomCode();
   roomCodeEl.textContent = roomCode;
-  const url = `${location.origin}/controller.html?room=${roomCode}`;
-  joinUrlEl.textContent = location.host + '/controller.html';
+  // Resolve relative to the current page so it works both at the server root
+  // and at a subpath (e.g. GitHub Pages /iSword/).
+  const url = new URL('controller.html?room=' + roomCode, location.href).href;
+  joinUrlEl.textContent = new URL('controller.html', location.href).href.replace(/^https?:\/\//, '');
   // QR (davidshimjs/qrcodejs renders into the #qr element)
   if (window.QRCode && $('qr')) {
     try {

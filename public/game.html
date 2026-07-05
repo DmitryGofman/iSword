@@ -7,35 +7,243 @@
   <link rel="icon" href="favicon.svg" />
   <link rel="stylesheet" href="css/style.css" />
   <style>
+    :root {
+      --gold: #ffcf6a; --gold-deep: #b8862f; --ember: #ff7a3c;
+      --ink: #07090f; --panel: rgba(14,14,20,0.72);
+      --line: rgba(255,200,110,0.28);
+    }
+    html, body { overflow: hidden; }
     #app { position: fixed; inset: 0; }
-    canvas { display: block; width: 100%; height: 100%; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 
-    .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 20; }
-    .overlay.hidden { display: none; }
+    /* ---------- damage numbers ---------- */
+    #dmg { position: fixed; inset: 0; pointer-events: none; z-index: 8; overflow: hidden; }
+    .dmg {
+      position: absolute; transform: translate(-50%, -50%);
+      font-weight: 900; font-size: 30px; letter-spacing: .5px;
+      color: #fff; text-shadow: 0 2px 10px rgba(0,0,0,.7), 0 0 18px rgba(255,210,120,.5);
+      animation: floatUp 0.85s ease-out forwards; will-change: transform, opacity;
+      font-variant-numeric: tabular-nums;
+    }
+    .dmg.big     { font-size: 38px; color: var(--gold); }
+    .dmg.perfect { font-size: 40px; color: #b79bff; text-shadow: 0 0 22px rgba(150,120,255,.8); }
+    .dmg.crit    { font-size: 46px; color: #ff5c7a; text-shadow: 0 0 24px rgba(255,80,110,.9); }
+    .dmg.graze   { font-size: 20px; color: #9aa3b8; opacity: .8; }
+    @keyframes floatUp {
+      0%   { opacity: 0; transform: translate(-50%, -30%) scale(.6); }
+      18%  { opacity: 1; transform: translate(-50%, -60%) scale(1.15); }
+      100% { opacity: 0; transform: translate(-50%, -150%) scale(1); }
+    }
 
-    #pairCard { width: min(560px, 94vw); text-align: center; }
-    .pairgrid { display: flex; gap: 26px; align-items: center; justify-content: center; flex-wrap: wrap; }
-    .pairgrid .left { text-align: left; }
-    .step { color: var(--muted); font-size: 14px; line-height: 1.7; margin: 10px 0; }
-    .step b { color: var(--fg); }
-
-    /* HUD */
+    /* ---------- HUD ---------- */
     #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; font-variant-numeric: tabular-nums; }
-    #hud .tl { position: absolute; top: 18px; left: 20px; }
-    #hud .tr { position: absolute; top: 18px; right: 20px; text-align: right; }
-    #hud .bc { position: absolute; bottom: 22px; left: 0; right: 0; text-align: center; }
-    .stat { font-size: 15px; color: var(--muted); }
-    .stat .n { font-size: 30px; font-weight: 800; color: var(--fg); }
-    .combo { color: var(--gold); font-weight: 800; font-size: 22px; min-height: 26px; text-shadow: 0 0 16px rgba(255,209,102,.5); }
-    .power-wrap { width: 190px; height: 12px; border-radius: 8px; background: rgba(0,0,0,.35); border: 1px solid var(--border); overflow: hidden; margin-left: auto; margin-top: 6px; }
-    .power-wrap > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg,#4ade80,#ffd166,#ff5c7a); transition: width .08s linear; }
-    .hint-pill { display: inline-block; padding: 8px 16px; border-radius: 999px; background: rgba(0,0,0,.4); border: 1px solid var(--border); color: var(--muted); font-size: 13.5px; }
-    .flash { position: fixed; inset: 0; background: radial-gradient(circle at center, rgba(255,255,255,.0), rgba(255,255,255,0)); pointer-events: none; z-index: 9; }
+    .hud-tl { position: absolute; top: max(16px, env(safe-area-inset-top)); left: 20px; }
+    .hud-tr { position: absolute; top: max(16px, env(safe-area-inset-top)); right: 20px; text-align: right; }
+    .hud-tc { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); text-align: center; }
 
-    .conn { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 15; }
-    .miniqr { background:#fff; padding:8px; border-radius:10px; line-height:0; }
-    .miniqr canvas { width:132px; height:132px; }
+    .score { font-size: clamp(30px, 6vw, 48px); font-weight: 900; color: #fff;
+      text-shadow: 0 0 22px rgba(255,207,106,.35); line-height: 1; letter-spacing: 1px; }
+    .score small { font-size: 14px; color: var(--gold); font-weight: 700; letter-spacing: 2px; margin-left: 6px; }
+    .subline { color: #9aa3b8; font-size: 13px; margin-top: 5px; }
+    .subline b { color: var(--gold); }
+
+    .crest { width: 54px; height: 54px; filter: drop-shadow(0 0 14px rgba(255,207,106,.4)); opacity: .95; }
+
+    .speedbox { color: #9aa3b8; font-size: 13px; letter-spacing: 1.5px; }
+    .speedbox .v { font-size: clamp(26px, 5vw, 40px); font-weight: 900; color: #fff; }
+    .speedbox .u { font-size: 13px; color: var(--gold); }
+    .pbar { width: 180px; height: 10px; border-radius: 6px; background: rgba(0,0,0,.4);
+      border: 1px solid var(--line); overflow: hidden; margin: 7px 0 0 auto; }
+    .pbar > i { display: block; height: 100%; width: 0%;
+      background: linear-gradient(90deg, #5ce08a, var(--gold), var(--ember)); transition: width .08s linear; }
+
+    /* combo tower (left) */
+    #comboWrap {
+      position: absolute; left: 20px; top: 50%; transform: translateY(-50%) translateX(-30px);
+      display: flex; align-items: center; gap: 14px; opacity: 0; transition: opacity .25s, transform .25s;
+    }
+    #comboWrap.show { opacity: 1; transform: translateY(-50%) translateX(0); }
+    .combo-meter { width: 12px; height: 200px; border-radius: 8px; background: rgba(0,0,0,.4);
+      border: 1px solid var(--line); overflow: hidden; display: flex; align-items: flex-end; }
+    .combo-meter > i { display: block; width: 100%; height: 0%; background: var(--gold);
+      box-shadow: 0 0 16px currentColor; transition: height .18s ease, background .2s; }
+    .combo-info .lbl { font-size: 13px; letter-spacing: 3px; color: #9aa3b8; }
+    .combo-info .n { font-size: clamp(46px, 11vw, 86px); font-weight: 900; line-height: .9;
+      color: var(--gold); text-shadow: 0 0 26px currentColor; }
+    .combo-info .tier { font-size: clamp(15px, 3vw, 20px); font-weight: 800; letter-spacing: 3px; }
+
+    /* target card (right) */
+    #targetCard { position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+      background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+      padding: 14px 18px; text-align: center; backdrop-filter: blur(8px); min-width: 116px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+    #targetCard .cap { font-size: 11px; letter-spacing: 3px; color: #9aa3b8; }
+    #targetCard .part { font-size: 22px; font-weight: 900; color: #fff; margin: 3px 0; }
+    #targetCard .mult { display: inline-block; padding: 3px 12px; border-radius: 999px;
+      background: rgba(255,207,106,.14); border: 1px solid var(--line); color: var(--gold); font-weight: 800; }
+    #targetCard.rush { border-color: #ff5c7a55; box-shadow: 0 0 30px rgba(255,90,120,.25); }
+    #targetCard.rush .cap::before { content: '▶ '; color: #ff5c7a; }
+
+    /* bottom banner */
+    .banner { position: absolute; bottom: max(20px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; }
+    #popText { font-size: clamp(24px, 6vw, 44px); font-weight: 900; letter-spacing: 2px;
+      color: var(--gold); opacity: 0; min-height: 1.1em; text-shadow: 0 0 26px currentColor; }
+    #popText.pop { animation: popIn .9s ease-out; }
+    @keyframes popIn { 0%{opacity:0;transform:scale(.5)} 20%{opacity:1;transform:scale(1.25)} 70%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(1)} }
+    .banner-plate { display: inline-block; margin-top: 6px; padding: 10px 34px; border-radius: 12px;
+      background: linear-gradient(180deg, rgba(60,44,18,.7), rgba(24,18,8,.7));
+      border: 1px solid var(--line); box-shadow: 0 0 30px rgba(255,180,80,.15), inset 0 0 20px rgba(255,180,80,.06); }
+    .banner-plate .t { font-size: clamp(18px, 4.4vw, 28px); font-weight: 900; letter-spacing: 4px;
+      color: var(--gold); text-shadow: 0 0 18px rgba(255,207,106,.4); }
+    .banner-plate .t::before, .banner-plate .t::after { content: '⟡'; color: var(--gold-deep); margin: 0 12px; font-size: .7em; vertical-align: middle; }
+    .banner-plate .h { color: #b9c0d0; font-size: 13px; margin-top: 3px; }
+
+    .flash { position: fixed; inset: 0; pointer-events: none; z-index: 9; background: none; }
+
+    /* ---------- start overlay ---------- */
+    .overlay { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-start;
+      justify-content: center; padding: 24px 16px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .overlay.hidden { display: none; }
+    #pairCard { width: min(560px, 96vw); text-align: center; margin: auto; }
+    .section-h { font-size: 12px; letter-spacing: 3px; color: #8b93b8; margin: 18px 0 10px; text-transform: uppercase; }
+
+    .modes { display: flex; gap: 12px; justify-content: center; }
+    .mode-opt { flex: 1; max-width: 220px; cursor: pointer; border-radius: 14px; padding: 16px 12px;
+      background: linear-gradient(180deg, rgba(40,34,20,.6), rgba(20,18,12,.6));
+      border: 1px solid var(--line); transition: transform .12s, border-color .15s, box-shadow .15s; }
+    .mode-opt:hover { transform: translateY(-2px); }
+    .mode-opt.sel { border-color: var(--gold); box-shadow: 0 0 26px rgba(255,180,80,.25); background: linear-gradient(180deg, rgba(70,52,20,.7), rgba(30,24,12,.7)); }
+    .mode-opt .ico { font-size: 30px; }
+    .mode-opt .nm { font-weight: 800; margin: 6px 0 2px; color: #fff; }
+    .mode-opt .ds { font-size: 12px; color: #9aa3b8; line-height: 1.4; }
+
+    .skins { display: flex; gap: 14px; justify-content: center; }
+    .skin-opt { cursor: pointer; text-align: center; }
+    .skin-opt .sw { width: 56px; height: 56px; border-radius: 50%; border: 2px solid transparent;
+      box-shadow: inset 0 -8px 14px rgba(0,0,0,.4), 0 6px 16px rgba(0,0,0,.5); transition: transform .12s, border-color .15s; }
+    .skin-opt:hover .sw { transform: scale(1.06); }
+    .skin-opt.sel .sw { border-color: var(--gold); box-shadow: 0 0 20px rgba(255,207,106,.5), inset 0 -8px 14px rgba(0,0,0,.4); }
+    .skin-opt .nm { font-size: 12px; color: #9aa3b8; margin-top: 6px; }
+    .skin-opt.sel .nm { color: var(--gold); }
+
+    .feats { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+    .feat { flex: 1; min-width: 120px; }
+    .feat .fi { font-size: 22px; } .feat .ft { font-size: 12.5px; font-weight: 700; color: #cdd3e0; margin-top: 4px; }
+    .feat .fd { font-size: 11px; color: #8b93b8; }
+
+    .btn-gold { appearance: none; border: none; cursor: pointer; font-size: 19px; font-weight: 800; letter-spacing: 2px;
+      color: #2a1c05; background: linear-gradient(180deg, #ffe3a0, var(--gold)); padding: 16px 30px; border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(255,180,80,.35); width: 100%; max-width: 360px; transition: transform .1s; }
+    .btn-gold:active { transform: scale(.98); }
+    .miniqr { background:#fff; padding:8px; border-radius:10px; line-height:0; display:inline-block; }
+    .miniqr canvas, .miniqr img { width:132px; height:132px; }
   </style>
+  <script src="vendor/qrcode.min.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="dmg"></div>
+  <div class="flash" id="flash"></div>
+
+  <!-- HUD -->
+  <div id="hud" style="display:none">
+    <div class="hud-tl">
+      <div class="score"><span id="scoreN">0</span><small>SCORE</small></div>
+      <div class="subline"><span id="hitsN">0</span> hits · best combo <b id="bestCombo">0</b></div>
+    </div>
+    <div class="hud-tc">
+      <svg class="crest" viewBox="0 0 64 64" aria-hidden="true">
+        <g transform="rotate(45 32 32)">
+          <rect x="30" y="7" width="4" height="36" rx="1.5" fill="#ffcf6a"/>
+          <polygon points="30,7 34,7 32,2" fill="#fff"/>
+          <rect x="23" y="43" width="18" height="4" rx="2" fill="#b8862f"/>
+          <rect x="30.5" y="47" width="3" height="11" rx="1.5" fill="#6a4a1a"/>
+          <circle cx="32" cy="59" r="2.6" fill="#ffcf6a"/>
+        </g>
+      </svg>
+    </div>
+    <div class="hud-tr">
+      <div class="speedbox">SWING SPEED<br/><span class="v" id="speedN">0.0</span> <span class="u">M/S</span></div>
+      <div class="pbar"><i id="powerFill"></i></div>
+    </div>
+
+    <div id="comboWrap">
+      <div class="combo-meter"><i id="comboMeterFill"></i></div>
+      <div class="combo-info">
+        <div class="lbl">COMBO</div>
+        <div class="n" id="comboN">0</div>
+        <div class="tier" id="comboTier">GOOD</div>
+      </div>
+    </div>
+
+    <div id="targetCard">
+      <div class="cap" id="targetCardCap">TARGET</div>
+      <div class="part" id="targetPart">HEAD</div>
+      <div class="mult" id="targetMult">×2</div>
+    </div>
+
+    <div class="banner">
+      <div id="popText"></div>
+      <div class="banner-plate">
+        <div class="t" id="bannerTitle">SWING TO STRIKE</div>
+        <div class="h" id="bannerHint">Swing to strike · aim for the <b>head</b> for 2×</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Start overlay -->
+  <div class="overlay" id="overlay">
+    <div class="card" id="pairCard">
+      <h1 class="brand" style="font-size:clamp(32px,8vw,64px);margin-bottom:2px">i<span class="blade">Sword</span></h1>
+      <p class="tag" style="margin:0 auto 6px">TRAIN HARD · STRIKE TRUE</p>
+
+      <div class="section-h">Choose your mode</div>
+      <div class="modes">
+        <div class="mode-opt sel" data-mode="free">
+          <div class="ico">🗡️</div><div class="nm">Free Training</div>
+          <div class="ds">Swing freely. Every strike scores — chain hits for huge combos.</div>
+        </div>
+        <div class="mode-opt" data-mode="rush">
+          <div class="ico">🎯</div><div class="nm">Target Rush</div>
+          <div class="ds">A weak point lights up — strike it in succession before it fades.</div>
+        </div>
+      </div>
+
+      <div class="section-h">Dummy skin</div>
+      <div class="skins">
+        <div class="skin-opt sel" data-skin="oak"><div class="sw" style="background:radial-gradient(circle at 40% 30%, #c98d4f, #7d5228)"></div><div class="nm">Oak</div></div>
+        <div class="skin-opt" data-skin="iron"><div class="sw" style="background:radial-gradient(circle at 40% 30%, #c3ccd6, #5b636d)"></div><div class="nm">Iron</div></div>
+        <div class="skin-opt" data-skin="gold"><div class="sw" style="background:radial-gradient(circle at 40% 30%, #ffe08a, #b07d1f)"></div><div class="nm">Gold</div></div>
+      </div>
+
+      <div id="pairBlock">
+        <div class="section-h">Connect your phone</div>
+        <div class="row" style="justify-content:center; gap:22px; flex-wrap:wrap">
+          <div class="miniqr" id="qrBox"><div id="qr"></div></div>
+          <div style="text-align:left">
+            <div class="step" style="color:#9aa3b8;font-size:13px;line-height:1.7">Open <b id="joinUrl" style="color:#fff">this site</b><br/>on your phone</div>
+            <div class="step" style="color:#9aa3b8;font-size:13px;line-height:1.7">Room code <span class="code" id="roomCode" style="font-size:26px">····</span></div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:14px; justify-content:center">
+          <span class="pill"><span class="dot" id="pairDot"></span> <span id="pairStatus">waiting for phone…</span></span>
+        </div>
+      </div>
+
+      <div class="feats">
+        <div class="feat"><div class="fi">🌀</div><div class="ft">Real Motion</div><div class="fd">detects swings live</div></div>
+        <div class="feat"><div class="fi">📈</div><div class="ft">Skill Growth</div><div class="fd">beat your best combo</div></div>
+        <div class="feat"><div class="fi">🎯</div><div class="ft">Pure Focus</div><div class="fd">just you &amp; the blade</div></div>
+      </div>
+
+      <div style="height:18px"></div>
+      <button class="btn-gold" id="startBtn">ENTER ARENA</button>
+      <div style="height:10px"></div>
+      <button class="btn secondary" id="mouseBtn">Try with mouse / keyboard</button>
+      <p class="muted" style="margin-top:12px" id="localHint"></p>
+    </div>
+  </div>
+
   <script type="importmap">
   {
     "imports": {
@@ -44,53 +252,6 @@
     }
   }
   </script>
-  <script src="vendor/qrcode.min.js"></script>
-</head>
-<body>
-  <div id="app"></div>
-  <div class="flash" id="flash"></div>
-
-  <!-- HUD -->
-  <div id="hud" style="display:none">
-    <div class="tl">
-      <div class="stat"><span class="n" id="hitsN">0</span> hits</div>
-      <div class="stat" style="margin-top:6px">best combo <b id="bestCombo" style="color:var(--gold)">0</b></div>
-    </div>
-    <div class="tr">
-      <div class="stat">swing <span class="n" id="speedN">0.0</span> <span style="font-size:13px">m/s</span></div>
-      <div class="power-wrap"><i id="powerFill"></i></div>
-    </div>
-    <div class="bc">
-      <div class="combo" id="comboText"></div>
-      <div style="height:8px"></div>
-      <span class="hint-pill" id="hintPill">Tap <b>Calibrate</b> on your phone, then swing</span>
-    </div>
-  </div>
-
-  <!-- Pairing / start overlay -->
-  <div class="overlay" id="overlay">
-    <div class="card" id="pairCard">
-      <h1 class="brand" style="font-size:clamp(30px,7vw,60px);margin-bottom:6px">i<span class="blade">Sword</span></h1>
-      <p class="tag" style="margin:0 auto 18px">Training Arena · fight the dummy</p>
-      <div class="pairgrid">
-        <div class="miniqr" id="qrBox"><div id="qr"></div></div>
-        <div class="left">
-          <div class="step">1 · On your phone open<br/><b id="joinUrl">this site</b></div>
-          <div class="step">2 · Enter room code<br/><span class="code" id="roomCode">····</span></div>
-          <div class="step">3 · Hold phone as a grip, tap <b>Calibrate</b>, swing!</div>
-        </div>
-      </div>
-      <div class="row" style="margin-top:18px">
-        <span class="pill"><span class="dot" id="pairDot"></span> <span id="pairStatus">waiting for phone…</span></span>
-      </div>
-      <div style="height:16px"></div>
-      <button class="btn" id="startBtn">Enter Arena</button>
-      <div style="height:10px"></div>
-      <button class="btn secondary" id="mouseBtn">Try with mouse / keyboard</button>
-      <p class="muted" style="margin-top:12px" id="localHint"></p>
-    </div>
-  </div>
-
   <script type="module" src="js/game.js"></script>
 </body>
 </html>

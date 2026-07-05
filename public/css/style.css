@@ -13,14 +13,19 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html, body {
-  height: 100%;
+html { height: 100%; }
+body {
+  min-height: 100%;
   background: radial-gradient(120% 120% at 50% -10%, #1a2144 0%, var(--bg) 60%);
+  background-attachment: fixed;
   color: var(--fg);
   font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow: hidden;
-  touch-action: none;
+  /* Menu / controller pages scroll on mobile; the game page re-locks this
+     with its own `overflow:hidden` and a non-scrolling canvas. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .wrap {

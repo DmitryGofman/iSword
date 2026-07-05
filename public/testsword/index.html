@@ -45,10 +45,10 @@
     .tele .t b { color:#eef1ff; font-variant-numeric:tabular-nums; }
 
     /* bottom controls */
-    .bottom { position:fixed; bottom:0; left:0; right:0; z-index:10; display:flex; gap:10px; justify-content:center;
+    .bottom { position:fixed; bottom:0; left:0; right:0; z-index:10; display:flex; gap:8px; justify-content:center; flex-wrap:wrap;
       padding:12px 14px calc(12px + env(safe-area-inset-bottom)); background:linear-gradient(#07090f00,#07090fcc); }
     .btn { pointer-events:auto; cursor:pointer; border:none; border-radius:12px; font-weight:800; font-size:14px;
-      padding:13px 18px; -webkit-tap-highlight-color:transparent; }
+      padding:13px 16px; -webkit-tap-highlight-color:transparent; }
     .btn.gold { background:linear-gradient(180deg,#ffe3a0,var(--gold)); color:#2a1c05; }
     .btn.ghost { background:rgba(20,24,40,.8); color:#eef1ff; border:1px solid var(--line); }
     .btn:active { transform:scale(.96); }
@@ -95,6 +95,7 @@
   <div class="bottom">
     <button class="btn gold" id="enableBtn">Enable Motion</button>
     <button class="btn ghost" id="calBtn">Calibrate</button>
+    <button class="btn ghost" id="resetBtn">Reset</button>
     <button class="btn ghost" id="panelBtn">Hide panel</button>
   </div>
 
@@ -117,8 +118,18 @@
     scene.background = new THREE.Color(0x0a0d16);
     scene.fog = new THREE.Fog(0x0a0d16, 6, 20);
     const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.05, 100);
-    camera.position.set(0, 1.55, 2.0);
-    camera.lookAt(0, 1.25, 0);
+    const camLook = new THREE.Vector3(0, 1.25, 0);
+    const camBase = new THREE.Vector3(0, 1.55, 2.0);
+    let zoom = 1; // <1 closer, >1 farther
+    const setZoom = (z)=> zoom = THREE.MathUtils.clamp(z, 0.5, 2.2);
+    camera.position.copy(camBase); camera.lookAt(camLook);
+    // pinch (mobile) + wheel (desktop)
+    let pinchD = 0;
+    addEventListener('touchmove', (e)=>{ if(e.touches.length===2){
+      const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+      if(pinchD) setZoom(zoom*(pinchD/d)); pinchD=d; } }, {passive:true});
+    addEventListener('touchend', ()=>{ pinchD=0; });
+    addEventListener('wheel', (e)=>setZoom(zoom*(e.deltaY>0?1.08:0.925)), {passive:true});
 
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -189,13 +200,22 @@
       out.multiply(q1); out.multiply(new THREE.Quaternion().setFromAxisAngle(zee,-orient)); return out; }
 
     const input = { mode:'idle', rawQ:new THREE.Quaternion(), refInv:new THREE.Quaternion(), hasCalib:false,
-      rate:new THREE.Vector3(), mYaw:0, mPitch:0, mYawT:0, mPitchT:0, lastMove:0 };
+      rate:new THREE.Vector3(), accel:new THREE.Vector3(), mYaw:0, mPitch:0, mYawT:0, mPitchT:0, lastMove:0 };
+    const grav = new THREE.Vector3();
 
     function screenAngle(){ const so=(screen.orientation&&screen.orientation.angle)||window.orientation||0; return so*Math.PI/180; }
     function onOrient(ev){ if(ev.alpha==null&&ev.beta==null&&ev.gamma==null) return;
       deviceQ((ev.alpha||0)*Math.PI/180,(ev.beta||0)*Math.PI/180,(ev.gamma||0)*Math.PI/180, screenAngle(), input.rawQ);
       input.mode='sensor'; if(!input.hasCalib){ input.refInv.copy(input.rawQ).invert(); input.hasCalib=true; } }
-    function onMotion(ev){ const r=ev.rotationRate; if(r) input.rate.set((r.beta||0)*Math.PI/180,(r.alpha||0)*Math.PI/180,(r.gamma||0)*Math.PI/180); }
+    function onMotion(ev){
+      const r=ev.rotationRate; if(r) input.rate.set((r.beta||0)*Math.PI/180,(r.alpha||0)*Math.PI/180,(r.gamma||0)*Math.PI/180);
+      // linear acceleration (gravity removed). iOS gives ev.acceleration; else high-pass ev.accelerationIncludingGravity.
+      const a=ev.acceleration;
+      if(a && a.x!=null){ input.accel.set(a.x||0, a.y||0, a.z||0); }
+      else { const g=ev.accelerationIncludingGravity; if(g){
+        grav.set(grav.x*0.92+(g.x||0)*0.08, grav.y*0.92+(g.y||0)*0.08, grav.z*0.92+(g.z||0)*0.08);
+        input.accel.set((g.x||0)-grav.x, (g.y||0)-grav.y, (g.z||0)-grav.z); } }
+    }
 
     async function enableMotion(){
       const needO=typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function';
@@ -222,6 +242,9 @@
       stiffness:{label:'Spring stiffness', min:20, max:320, step:5, val:130},
       damping:{label:'Spring damping', min:2, max:44, step:1, val:16},
       deadzone:{label:'Deadzone (°)', min:0, max:14, step:0.5, val:2},
+      posScale:{label:'Position push', min:0, max:3, step:0.05, val:1.1},
+      posReturn:{label:'Return speed', min:15, max:240, step:5, val:100},
+      posDamp:{label:'Position damping', min:2, max:44, step:1, val:16},
     };
     const P = (k)=>PARAMS[k].val;
     const MODES = [
@@ -235,6 +258,8 @@
         desc:'The blade eases toward your aim with real momentum and weight. Stiffer = snappier, lower damping = more overshoot/whip.'},
       {id:'rate', name:'Rate / gyro', params:['sensitivity'],
         desc:'Angular velocity spins the blade — no absolute reference, so it drifts, but flicks feel instant. Recalibrate to re-center.'},
+      {id:'nudge', name:'IMU nudge (spring-back)', params:['smoothing','posScale','posReturn','posDamp'],
+        desc:'📱 Phone only. The ANGLE stays from the gyro; physically moving the phone nudges the handle position a little, then a spring pulls it back to center — so it never drifts. A subtle thrust/parry feel. Reset re-centers.'},
     ];
     let mode = MODES[0];
     const omega = new THREE.Vector3(); // for spring mode
@@ -262,6 +287,28 @@
       const na=Math.sign(ang)*Math.max(0, Math.abs(ang)-dz); _dq.setFromAxisAngle(_axis, na); return _dq; }
 
     let prevTip=new THREE.Vector3(), haveTip=false, tipSpeed=0, angSpeed=0, prevQ=new THREE.Quaternion();
+    // positional handle spring (IMU nudge mode) + camera zoom temps
+    const posOffset=new THREE.Vector3(), posVel=new THREE.Vector3(), _wAccel=new THREE.Vector3(), posForce=new THREE.Vector3(), _camDir=new THREE.Vector3();
+    function updatePosition(dt){
+      if(mode.id==='nudge'){
+        _wAccel.copy(input.accel).applyQuaternion(sword.quaternion); // device-frame accel -> world
+        posForce.copy(_wAccel).multiplyScalar(P('posScale'));         // driven by phone movement
+        posForce.addScaledVector(posOffset, -P('posReturn'));         // spring back to centre (no drift)
+        posForce.addScaledVector(posVel, -P('posDamp'));              // damping
+        posVel.addScaledVector(posForce, dt);
+        posOffset.addScaledVector(posVel, dt);
+        if(posOffset.length()>0.45) posOffset.setLength(0.45);
+      } else { // ease any offset back to zero when leaving the mode
+        posVel.multiplyScalar(Math.max(0,1-8*dt));
+        posOffset.multiplyScalar(Math.max(0,1-8*dt));
+      }
+    }
+    function resetAll(){
+      posOffset.set(0,0,0); posVel.set(0,0,0); omega.set(0,0,0);
+      input.refInv.copy(input.rawQ).invert(); input.hasCalib=true;
+      sword.quaternion.copy(mountQ);
+      $('hint').textContent='Reset — re-centered.';
+    }
 
     function updateControl(dt){
       relQuat(_rel);
@@ -273,7 +320,7 @@
       _target.copy(mountQ).multiply(applyDeadzone(_rel));
       if(mode.id==='amplified'){ const ang=axisAngle(_rel)*P('sensitivity'); _dq.setFromAxisAngle(_axis, ang); _target.copy(mountQ).multiply(_dq); }
       if(mode.id==='absolute'){ sword.quaternion.copy(_target); return; }
-      if(mode.id==='smoothed'||mode.id==='amplified'){ const f=THREE.MathUtils.clamp(1-Math.pow(P('smoothing'),dt*60),0,1); sword.quaternion.slerp(_target, f||1); return; }
+      if(mode.id==='smoothed'||mode.id==='amplified'||mode.id==='nudge'){ const f=THREE.MathUtils.clamp(1-Math.pow(P('smoothing'),dt*60),0,1); sword.quaternion.slerp(_target, f||1); return; }
       if(mode.id==='spring'){
         _tmp.copy(_target).multiply(sword.quaternion.clone().invert()); // delta current->target (world)
         const ang=axisAngle(_tmp);
@@ -297,7 +344,8 @@
       fpsMs = fpsMs*0.9 + dt*1000*0.1;
 
       updateControl(dt);
-      sword.position.copy(handAnchor);
+      updatePosition(dt);
+      sword.position.copy(handAnchor).add(posOffset);
 
       curBase.copy(BLADE_BASE).applyQuaternion(sword.quaternion).add(sword.position);
       curTip.copy(BLADE_TIP).applyQuaternion(sword.quaternion).add(sword.position);
@@ -329,6 +377,10 @@
       $('tTip').textContent = `${tipSpeed.toFixed(1)} m/s`;
       $('tFps').textContent = `${fpsMs.toFixed(1)} ms`;
 
+      // camera zoom (pinch / wheel)
+      camera.position.copy(camLook).addScaledVector(_camDir.copy(camBase).sub(camLook), zoom);
+      camera.lookAt(camLook);
+
       renderer.render(scene,camera);
     }
     frame();
@@ -339,12 +391,12 @@
     renderModes(); renderSliders();
     $('enableBtn').onclick = enableMotion;
     $('calBtn').onclick = calibrate;
-    // tap-to-calibrate on touch
-    addEventListener('pointerdown',(e)=>{ if(e.target.closest('.btn,.chip,.panel,.top')) return; if(e.pointerType==='touch') calibrate(); });
+    $('resetBtn').onclick = resetAll;
     $('panelBtn').onclick = ()=>{ const p=$('panel'); p.classList.toggle('hidden'); $('panelBtn').textContent = p.classList.contains('hidden')?'Show panel':'Hide panel'; };
 
     // expose for tinkering
-    window.lab = { input, MODES, PARAMS, setMode:(id)=>{ mode=MODES.find(m=>m.id===id)||mode; renderModes(); renderSliders(); }, get score(){return score;} };
+    window.lab = { input, MODES, PARAMS, resetAll, setZoom, get zoom(){return zoom;}, get posOffset(){return posOffset;},
+      setMode:(id)=>{ mode=MODES.find(m=>m.id===id)||mode; renderModes(); renderSliders(); }, get mode(){return mode.id;}, get score(){return score;} };
   </script>
 </body>
 </html>

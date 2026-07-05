@@ -100,6 +100,13 @@
 
     .flash { position: fixed; inset: 0; pointer-events: none; z-index: 9; background: none; }
 
+    /* zoom controls */
+    .zoomctl { position: absolute; right: 20px; bottom: 92px; display: flex; flex-direction: column; gap: 10px; pointer-events: auto; }
+    .zoomctl button { width: 48px; height: 48px; border-radius: 12px; border: 1px solid var(--line);
+      background: rgba(14,14,20,0.72); color: var(--gold); font-size: 26px; font-weight: 800; line-height: 1;
+      cursor: pointer; backdrop-filter: blur(8px); box-shadow: 0 8px 24px rgba(0,0,0,.4); -webkit-tap-highlight-color: transparent; }
+    .zoomctl button:active { transform: scale(0.94); }
+
     /* duel HUD */
     .hpbar { position: absolute; left: 50%; transform: translateX(-50%); width: min(360px, 66vw); }
     .hpbar.enemy { top: 74px; }
@@ -211,6 +218,11 @@
       <div class="hpbar enemy"><span class="lbl">DUMMY</span><div class="track"><i id="enemyHp"></i></div></div>
       <div class="hpbar player"><span class="lbl">YOU</span><div class="track"><i id="playerHp"></i></div></div>
       <div id="blockPrompt">⚔ BLOCK!</div>
+    </div>
+
+    <div class="zoomctl">
+      <button id="zoomIn" aria-label="Zoom in">+</button>
+      <button id="zoomOut" aria-label="Zoom out">&minus;</button>
     </div>
 
     <div class="banner">

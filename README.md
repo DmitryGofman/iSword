@@ -88,12 +88,23 @@ public/
   vendor/                 three.js + qrcode, vendored so it runs offline / on a LAN
 ```
 
+## Modes
+
+- **Free Training** — swing freely; every strike scores, chain hits for combos.
+- **Target Rush** — a weak point lights up; strike it in succession before it fades.
+- **Duel** — the dummy fights back with four kinds of swings (overhead, two
+  cross slashes, thrust). Block its blade with yours to parry, or take the hit.
+  Player + enemy health, victory / defeat, tap to rematch.
+
+Plus selectable **dummy skins** (Oak / Iron / Gold) and **sword skins**
+(Classic / Katana / Fire / Ice), and zoom in/out (buttons, wheel, or pinch).
+
 ## Roadmap
 
-- [x] Single-player training vs. a reactive dummy (this build)
+- [x] Single-player training vs. a reactive dummy
+- [x] Blocking / parrying, blade-on-blade collision (Duel mode)
+- [x] Rounds, health, win conditions (Duel mode)
 - [ ] Two phones → one TV: real-time duels
-- [ ] Blocking / parrying, blade-on-blade collision
-- [ ] Rounds, health, win conditions
 
 ## License
 

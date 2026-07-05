@@ -29,6 +29,7 @@
     .dmg.perfect { font-size: 40px; color: #b79bff; text-shadow: 0 0 22px rgba(150,120,255,.8); }
     .dmg.crit    { font-size: 46px; color: #ff5c7a; text-shadow: 0 0 24px rgba(255,80,110,.9); }
     .dmg.graze   { font-size: 20px; color: #9aa3b8; opacity: .8; }
+    .dmg.gold    { font-size: 27px; color: var(--gold); text-shadow: 0 0 18px rgba(255,209,102,.75), 0 2px 8px rgba(0,0,0,.7); }
     @keyframes floatUp {
       0%   { opacity: 0; transform: translate(-50%, -30%) scale(.6); }
       18%  { opacity: 1; transform: translate(-50%, -60%) scale(1.15); }
@@ -117,6 +118,9 @@
     @keyframes blockPulse { 0%,100%{opacity:.35;transform:translate(-50%,-50%) scale(.95)} 50%{opacity:1;transform:translate(-50%,-50%) scale(1.1)} }
     /* drone mode hides the enemy bar + block prompt, keeps YOU health */
     #duelHud.drones .hpbar.enemy, #duelHud.drones #blockPrompt { display: none; }
+    /* gold rush shows only the dummy HP bar */
+    #duelHud.idle .hpbar.player, #duelHud.idle #blockPrompt { display: none; }
+    #duelHud.idle .hpbar.enemy .track > i { background: linear-gradient(90deg, #b8862f, #ffd166); }
     .dronecount { color: #9aa3b8; font-size: 13px; margin-top: 8px; display: none; }
     .dronecount b { color: var(--gold); font-size: 17px; }
 
@@ -128,6 +132,31 @@
     #recalBtn { top: max(16px, env(safe-area-inset-top)); left: 50%; transform: translateX(-72px); display: none; }
     .hud-btn:active { transform: scale(.93); }
     #gearBtn:active { transform: translateX(28px) scale(.93); }
+    #shopBtn { right: 18px; bottom: 118px; width: 58px; height: 58px; font-size: 26px; display: none;
+      box-shadow: 0 0 22px rgba(255,207,106,.3); border-color: var(--gold); }
+
+    /* Gold Rush shop panel */
+    #shopPanel { position: fixed; top: 0; right: -380px; width: min(340px, 88vw); height: 100%; z-index: 26;
+      background: rgba(12,12,18,0.93); border-left: 1px solid var(--line); backdrop-filter: blur(12px);
+      transition: right .25s ease; padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+      overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    #shopPanel.open { right: 0; }
+    .shop-h { display: flex; justify-content: space-between; align-items: center; color: var(--gold);
+      font-weight: 800; letter-spacing: 2px; font-size: 15px; }
+    .shop-h button { background: none; border: none; color: #9aa3b8; font-size: 20px; cursor: pointer; }
+    .shop-gold { font-size: 24px; font-weight: 900; color: #fff; margin: 10px 0 14px; }
+    .shop-row { display: flex; gap: 10px; align-items: center; background: rgba(0,0,0,.3);
+      border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-bottom: 9px; }
+    .shop-row .ic { font-size: 22px; }
+    .shop-row .info { flex: 1; min-width: 0; }
+    .shop-row .info b { color: #fff; font-size: 14px; }
+    .shop-row .info em { color: var(--gold); font-style: normal; font-size: 12px; margin-left: 6px; }
+    .shop-row .info small { display: block; color: #8b93b8; font-size: 11.5px; margin-top: 2px; line-height: 1.35; }
+    .shop-row .buy { border: none; border-radius: 9px; padding: 9px 11px; font-weight: 800; font-size: 12.5px;
+      cursor: pointer; background: linear-gradient(180deg, #ffe3a0, var(--gold)); color: #2a1c05; white-space: nowrap; }
+    .shop-row .buy.no { background: #2a3057; color: #8b93b8; }
+    .shop-row .buy.owned { background: #1c7a3a; color: #dfffe9; }
+    .shop-note { color: #8b93b8; font-size: 11.5px; line-height: 1.5; margin-top: 10px; }
 
     /* Settings / combo modal */
     .modal { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center;
@@ -156,7 +185,8 @@
     #pairCard { width: min(560px, 96vw); text-align: center; margin: auto; }
     .section-h { font-size: 12px; letter-spacing: 3px; color: #8b93b8; margin: 18px 0 10px; text-transform: uppercase; }
 
-    .modes { display: flex; gap: 12px; justify-content: center; }
+    .modes { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .mode-opt { min-width: 150px; }
     .mode-opt { flex: 1; max-width: 220px; cursor: pointer; border-radius: 14px; padding: 16px 12px;
       background: linear-gradient(180deg, rgba(40,34,20,.6), rgba(20,18,12,.6));
       border: 1px solid var(--line); transition: transform .12s, border-color .15s, box-shadow .15s; }
@@ -207,8 +237,9 @@
   <!-- HUD -->
   <div id="hud" style="display:none">
     <div class="hud-tl">
-      <div class="score"><span id="scoreN">0</span><small>SCORE</small></div>
-      <div class="subline"><span id="hitsN">0</span> hits · best combo <b id="bestCombo">0</b></div>
+      <div class="score"><span id="scoreN">0</span><small id="scoreLbl">SCORE</small></div>
+      <div class="subline" id="subline"><span id="hitsN">0</span> hits · best combo <b id="bestCombo">0</b></div>
+      <div class="subline" id="idleSub" style="display:none"></div>
     </div>
     <div class="hud-tc">
       <svg class="crest" viewBox="0 0 64 64" aria-hidden="true">
@@ -246,10 +277,12 @@
     </div>
 
     <div id="duelHud" style="display:none">
-      <div class="hpbar enemy"><span class="lbl">DUMMY</span><div class="track"><i id="enemyHp"></i></div></div>
+      <div class="hpbar enemy"><span class="lbl" id="enemyHpLbl">DUMMY</span><div class="track"><i id="enemyHp"></i></div></div>
       <div class="hpbar player"><span class="lbl">YOU</span><div class="track"><i id="playerHp"></i></div></div>
       <div id="blockPrompt">⚔ BLOCK!</div>
     </div>
+
+    <button class="hud-btn" id="shopBtn" aria-label="Shop">🛒</button>
 
     <div class="banner">
       <div id="popText"></div>
@@ -258,6 +291,14 @@
         <div class="h" id="bannerHint">Swing to strike · aim for the <b>head</b> for 2×</div>
       </div>
     </div>
+  </div>
+
+  <!-- Gold Rush upgrade shop -->
+  <div id="shopPanel">
+    <div class="shop-h"><span>⚒ UPGRADE SHOP</span><button id="shopClose" aria-label="Close shop">✕</button></div>
+    <div class="shop-gold">🪙 <b id="shopGold">0</b></div>
+    <div id="shopList"></div>
+    <p class="shop-note">Kill the dummy to level it up — tougher, richer, new look every 5 levels. Progress saves automatically.</p>
   </div>
 
   <!-- Settings / combo list modal -->
@@ -297,6 +338,10 @@
         <div class="mode-opt" data-mode="drones">
           <div class="ico">🛸</div><div class="nm">Drone Slayer</div>
           <div class="ds">Drones swarm in from the dark — slash them out of the air.</div>
+        </div>
+        <div class="mode-opt" data-mode="idle">
+          <div class="ico">💰</div><div class="nm">Gold Rush</div>
+          <div class="ds">Idle clicker: every hit pays gold. Upgrade your blade, level the dummy — endless.</div>
         </div>
       </div>
 

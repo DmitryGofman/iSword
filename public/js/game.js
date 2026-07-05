@@ -860,6 +860,7 @@ function defaultHint() {
   if (game.mode === 'rush') return 'Strike the <b>glowing point</b> before it fades · chain them!';
   if (game.mode === 'duel') return 'The dummy strikes back — <b>block its blade with yours</b>, then counter!';
   if (game.mode === 'drones') return 'Drones incoming — <b>slash them</b> before they reach you!';
+  if (game.mode === 'idle') return 'Every hit pays gold — open the <b>🛒 shop</b> to upgrade!';
   return 'Swing to strike · <b>tap to stab</b> · aim for the head for 2×';
 }
 
@@ -1045,22 +1046,25 @@ function registerHit(cap, power, worldPoint, dir, metal) {
   const base = power * mult * 2.4;
   const comboFactor = 1 + (game.combo - 1) * 0.14;
   const dmg = Math.round(base * comboFactor);
-  game.score += dmg;
 
-  // HUD numbers
-  scoreN.textContent = game.score.toLocaleString();
+  if (game.mode !== 'idle') {
+    game.score += dmg;
+    scoreN.textContent = game.score.toLocaleString();
+  }
   hitsN.textContent = game.hits;
   bestComboEl.textContent = game.bestCombo;
   updateComboUI();
 
-  // floating number
-  let cls = '';
-  if (isHead) cls = 'crit';
-  else if (isPerfect) cls = 'perfect';
-  else if (mult >= 1.5) cls = 'big';
-  spawnDamageNumber(worldPoint, (isHead ? 'CRIT ' : '') + dmg, cls);
-  if (isHead) announce('CRITICAL!', '#ff4d6d');
-  else if (isPerfect && game.combo < 5) announce('PERFECT!', '#a48bff');
+  // floating number (Gold Rush spawns its own gold numbers instead)
+  if (game.mode !== 'idle') {
+    let cls = '';
+    if (isHead) cls = 'crit';
+    else if (isPerfect) cls = 'perfect';
+    else if (mult >= 1.5) cls = 'big';
+    spawnDamageNumber(worldPoint, (isHead ? 'CRIT ' : '') + dmg, cls);
+    if (isHead) announce('CRITICAL!', '#ff4d6d');
+    else if (isPerfect && game.combo < 5) announce('PERFECT!', '#a48bff');
+  }
 
   // effects
   burst(worldPoint, dir, power, swordSparkColor);
@@ -1076,6 +1080,7 @@ function registerHit(cap, power, worldPoint, dir, metal) {
 
   applyImpulse(worldPoint, dir, power);
   if (game.mode === 'duel') damageEnemy(power, mult);
+  if (game.mode === 'idle') idleOnHit(power * mult, worldPoint);
 
   if (net && net.joined) net.send({ t: 'haptic', ms: Math.min(70, 18 + power * 0.5) });
 }
@@ -1525,6 +1530,243 @@ function updateDrones(dt) {
 }
 
 // ---------------------------------------------------------------------------
+// Gold Rush — idle-clicker mode. Every hit pays gold; buy upgrades in the
+// shop; kill the dummy to level it up (more HP, better loot, new look).
+// Math follows the idle-game standard: exponential HP/costs, multiplicative
+// upgrades, so it scales infinitely.
+// ---------------------------------------------------------------------------
+const IDLE_KEY = 'isword-goldrush-v1';
+const idle = {
+  gold: 0, level: 1, hp: 30, maxHP: 30, totalKills: 0,
+  up: { dmg: 0, gold: 0, crit: 0, squire: 0 },
+  owned: {}, equip: 'classic',
+  squireT: 0, saveT: 0, coinT: 0,
+};
+const IDLE_UPGRADES = [
+  { id: 'dmg', icon: '🗡️', name: 'Sharpen Blade', desc: '+25% damage per level', base: 15, growth: 1.5 },
+  { id: 'gold', icon: '✨', name: 'Golden Touch', desc: '+20% gold per hit per level', base: 25, growth: 1.55 },
+  { id: 'crit', icon: '💥', name: 'Critical Edge', desc: '+3% crit chance (5× damage)', base: 80, growth: 1.7, max: 15 },
+  { id: 'squire', icon: '🤺', name: 'Squire', desc: 'Auto-hits every 2s (stacks per level)', base: 200, growth: 1.6 },
+];
+const IDLE_ITEMS = [
+  { id: 'coins', icon: '🔔', name: 'Coin Shower', desc: 'Richer coin sound · +20% gold', cost: 1200, goldBonus: 1.2 },
+  { id: 'katana', icon: '⚔️', name: 'Katana', desc: 'Swift blade skin · +25% gold', cost: 3000, goldBonus: 1.25, sword: 'katana' },
+  { id: 'fire', icon: '🔥', name: 'Fire Sword', desc: 'Embers & flames · +50% gold', cost: 12000, goldBonus: 1.5, sword: 'fire' },
+  { id: 'ice', icon: '❄️', name: 'Ice Sword', desc: 'Ice shards · +100% gold', cost: 50000, goldBonus: 2.0, sword: 'ice' },
+];
+function idleMaxHP(lv) { return Math.floor(30 * Math.pow(1.45, lv - 1)); }
+function idleDmgMult() { return Math.pow(1.25, idle.up.dmg); }
+function idleGoldMult() {
+  let m = Math.pow(1.2, idle.up.gold);
+  for (const it of IDLE_ITEMS) if (it.goldBonus && idle.owned[it.id]) m *= it.goldBonus;
+  return m;
+}
+function idleCritChance() { return Math.min(0.45, idle.up.crit * 0.03); }
+function upgradeCost(u) { return Math.floor(u.base * Math.pow(u.growth, idle.up[u.id])); }
+
+const SUFF = ['', 'K', 'M', 'B', 'T', 'q', 'Q', 's', 'S', 'o', 'N', 'd'];
+function fmt(n) {
+  if (!isFinite(n)) return '∞';
+  if (n < 1000) return String(n < 100 ? Math.round(n * 10) / 10 : Math.round(n));
+  let i = 0;
+  while (n >= 1000 && i < SUFF.length - 1) { n /= 1000; i++; }
+  if (n >= 1000) return n.toExponential(2);
+  return (n >= 100 ? Math.round(n) : Math.round(n * 10) / 10) + SUFF[i];
+}
+
+// bright coin "cha-ching" — richer with the Coin Shower upgrade
+function playCoin(rich) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const freqs = rich ? [1319, 1760, 2217] : [1319, 1760];
+  freqs.forEach((f, i) => {
+    const o = audioCtx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = f * (1 + (Math.random() - 0.5) * 0.012);
+    const g = audioCtx.createGain();
+    const t0 = t + i * 0.045;
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(rich ? 0.2 : 0.14, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t0); o.stop(t0 + 0.25);
+  });
+}
+
+function idleSave() {
+  try {
+    localStorage.setItem(IDLE_KEY, JSON.stringify({
+      gold: idle.gold, level: idle.level, hp: idle.hp, up: idle.up,
+      owned: idle.owned, equip: idle.equip, totalKills: idle.totalKills,
+    }));
+  } catch { /* private mode etc. */ }
+}
+function idleLoad() {
+  try {
+    const d = JSON.parse(localStorage.getItem(IDLE_KEY) || 'null');
+    if (!d) return;
+    Object.assign(idle.up, d.up || {});
+    idle.gold = d.gold || 0;
+    idle.level = d.level || 1;
+    idle.owned = d.owned || {};
+    idle.equip = d.equip || 'classic';
+    idle.totalKills = d.totalKills || 0;
+    idle.maxHP = idleMaxHP(idle.level);
+    idle.hp = Math.min(d.hp || idle.maxHP, idle.maxHP) || idle.maxHP;
+  } catch { /* corrupt save — start fresh */ }
+}
+idleLoad();
+
+// Dummy look levels up with you: named skins first, then endless hue tiers.
+const IDLE_TIER_SKINS = ['oak', 'iron', 'gold'];
+function applyIdleTier() {
+  const tier = Math.floor((idle.level - 1) / 5);
+  if (tier < IDLE_TIER_SKINS.length) {
+    applySkin(IDLE_TIER_SKINS[tier]);
+  } else {
+    applySkin('gold'); // metallic base, then re-tint
+    const c = new THREE.Color().setHSL(((tier * 47) % 360) / 360, 0.68, 0.5);
+    woodMat.color.copy(c);
+    woodMat.emissive.copy(c).multiplyScalar(0.18);
+    woodDark.color.copy(c).multiplyScalar(0.55);
+    ringBaseColor = c.getHex();
+    ring.material.color.setHex(ringBaseColor);
+  }
+}
+
+function updateIdleHUD() {
+  scoreN.textContent = fmt(idle.gold);
+  if (enemyHpEl) enemyHpEl.style.width = Math.max(0, (idle.hp / idle.maxHP) * 100) + '%';
+  const lbl = $('enemyHpLbl');
+  if (lbl) lbl.textContent = 'DUMMY · LEVEL ' + idle.level;
+  const sub = $('idleSub');
+  if (sub) sub.innerHTML = 'level <b style="color:var(--gold)">' + idle.level + '</b> · ~' + fmt((4 + 7.2) * idleDmgMult() * 0.5 * idleGoldMult()) + ' 🪙/hit · ' + idle.totalKills + ' felled';
+  const sg = $('shopGold');
+  if (sg) sg.textContent = fmt(idle.gold);
+}
+
+function idleDealDamage(dmg, worldPoint, crit) {
+  const g = dmg * 0.5 * idleGoldMult();
+  idle.gold += g;
+  idle.hp -= dmg;
+  // rate-limit the coin sound so fast flurries don't stack into noise
+  const now = performance.now();
+  if (now - idle.coinT > 70) { idle.coinT = now; playCoin(!!idle.owned.coins); }
+  spawnDamageNumber(worldPoint, '+' + fmt(g) + ' 🪙', crit ? 'crit' : 'gold');
+  if (idle.hp <= 0) idleKill();
+  updateIdleHUD();
+  if (shopPanelEl && shopPanelEl.classList.contains('open')) refreshShopAfford();
+}
+function idleOnHit(power, worldPoint) {
+  const crit = Math.random() < idleCritChance();
+  const dmg = (4 + power * 0.12) * idleDmgMult() * (crit ? 5 : 1);
+  if (crit) announce('CRIT!', '#ff4d6d');
+  idleDealDamage(dmg, worldPoint, crit);
+}
+function idleKill() {
+  const bonus = idle.maxHP * 0.6 * idleGoldMult();
+  idle.gold += bonus;
+  idle.totalKills++;
+  idle.level++;
+  idle.maxHP = idleMaxHP(idle.level);
+  idle.hp = idle.maxHP;
+  announce('LEVEL ' + idle.level + '!', '#ffd166');
+  spawnDamageNumber(new THREE.Vector3(0, 1.65, 0.2), '+' + fmt(bonus) + ' 🪙 BONUS', 'crit');
+  burst(new THREE.Vector3(0, 1.2, 0.2), new THREE.Vector3(0, 1, 0.3).normalize(), 95, 0xffd166, 5);
+  playCoin(true);
+  playChime(880, 0.3);
+  dummy.velX += 1.8; dummy.hitPulse = 1;
+  applyIdleTier();
+  renderShop();
+  idleSave();
+}
+function idleTick(dt) {
+  if (idle.up.squire > 0) {
+    idle.squireT += dt;
+    if (idle.squireT >= 2.0) {
+      idle.squireT = 0;
+      const p = new THREE.Vector3((Math.random() - 0.5) * 0.3, 1.0 + Math.random() * 0.5, 0.26);
+      burst(p, new THREE.Vector3(0, 0.5, 1).normalize(), 40, 0xcfd8ff, 2.4);
+      dummy.velX += 0.35; dummy.hitPulse = Math.max(dummy.hitPulse, 0.5);
+      idleDealDamage((4 + 6) * idleDmgMult() * 0.5 * idle.up.squire, p, false);
+    }
+  }
+  idle.saveT += dt;
+  if (idle.saveT > 5) { idle.saveT = 0; idleSave(); }
+}
+
+// --- Shop UI ---------------------------------------------------------------
+const shopPanelEl = $('shopPanel');
+function renderShop() {
+  const list = $('shopList');
+  if (!list) return;
+  list.innerHTML = '';
+  for (const u of IDLE_UPGRADES) {
+    const cost = upgradeCost(u);
+    const maxed = u.max && idle.up[u.id] >= u.max;
+    const row = document.createElement('div');
+    row.className = 'shop-row';
+    row.innerHTML =
+      `<span class="ic">${u.icon}</span>` +
+      `<span class="info"><b>${u.name}</b> <em>Lv ${idle.up[u.id]}${u.max ? '/' + u.max : ''}</em><small>${u.desc}</small></span>` +
+      `<button class="buy" data-up="${u.id}" data-cost="${cost}">${maxed ? 'MAX' : fmt(cost) + ' 🪙'}</button>`;
+    list.appendChild(row);
+  }
+  for (const it of IDLE_ITEMS) {
+    const owned = !!idle.owned[it.id];
+    const row = document.createElement('div');
+    row.className = 'shop-row';
+    const label = owned ? (it.sword ? (idle.equip === it.sword ? '✓ EQUIPPED' : 'EQUIP') : '✓ OWNED') : fmt(it.cost) + ' 🪙';
+    row.innerHTML =
+      `<span class="ic">${it.icon}</span>` +
+      `<span class="info"><b>${it.name}</b><small>${it.desc}</small></span>` +
+      `<button class="buy${owned ? ' owned' : ''}" data-item="${it.id}" data-cost="${owned ? 0 : it.cost}">${label}</button>`;
+    list.appendChild(row);
+  }
+  list.querySelectorAll('button[data-up]').forEach((b) => b.addEventListener('click', () => buyUpgrade(b.dataset.up)));
+  list.querySelectorAll('button[data-item]').forEach((b) => b.addEventListener('click', () => buyItem(b.dataset.item)));
+  refreshShopAfford();
+}
+function refreshShopAfford() {
+  if (!shopPanelEl) return;
+  shopPanelEl.querySelectorAll('.buy').forEach((b) => {
+    b.classList.toggle('no', !b.classList.contains('owned') && idle.gold < Number(b.dataset.cost || 0));
+  });
+  const sg = $('shopGold');
+  if (sg) sg.textContent = fmt(idle.gold);
+}
+function buyUpgrade(id) {
+  const u = IDLE_UPGRADES.find((x) => x.id === id);
+  if (!u || (u.max && idle.up[id] >= u.max)) return;
+  const cost = upgradeCost(u);
+  if (idle.gold < cost) return;
+  idle.gold -= cost;
+  idle.up[id]++;
+  playCoin(true); playChime(660, 0.2);
+  idleSave(); renderShop(); updateIdleHUD();
+}
+function buyItem(id) {
+  const it = IDLE_ITEMS.find((x) => x.id === id);
+  if (!it) return;
+  if (idle.owned[id]) {
+    if (it.sword) { idle.equip = it.sword; selectSword(it.sword); idleSave(); renderShop(); }
+    return;
+  }
+  if (idle.gold < it.cost) return;
+  idle.gold -= it.cost;
+  idle.owned[id] = true;
+  if (it.sword) { idle.equip = it.sword; selectSword(it.sword); }
+  playCoin(true); playChime(880, 0.25);
+  idleSave(); renderShop(); updateIdleHUD();
+}
+function toggleShop(open) {
+  if (!shopPanelEl) return;
+  const willOpen = open !== undefined ? open : !shopPanelEl.classList.contains('open');
+  shopPanelEl.classList.toggle('open', willOpen);
+  if (willOpen) renderShop();
+}
+
+// ---------------------------------------------------------------------------
 // Hitbox debug overlay (toggle in Settings) — see the real collision volumes
 // ---------------------------------------------------------------------------
 let debugHit = false;
@@ -1725,6 +1967,7 @@ function animate() {
   updateRush(dt);
   if (game.mode === 'duel') updateDuel(dt);
   if (game.mode === 'drones') updateDrones(dt);
+  if (game.mode === 'idle' && game.running) idleTick(dt);
   updateSparks(dt);
 
   // fire blade continuously sheds embers along its length
@@ -1800,7 +2043,7 @@ function setupNetworked() {
 // ---------------------------------------------------------------------------
 // Mode + skin selection (start overlay)
 // ---------------------------------------------------------------------------
-const MODE_TITLE = { duel: 'DUEL', rush: 'TARGET RUSH', drones: 'DRONE SLAYER', free: 'SWING TO STRIKE' };
+const MODE_TITLE = { duel: 'DUEL', rush: 'TARGET RUSH', drones: 'DRONE SLAYER', idle: 'GOLD RUSH', free: 'SWING TO STRIKE' };
 function selectMode(m) {
   game.mode = m;
   document.querySelectorAll('.mode-opt').forEach((el) => el.classList.toggle('sel', el.dataset.mode === m));
@@ -1858,10 +2101,22 @@ function enterArena() {
 
   const isDuel = game.mode === 'duel';
   const isDrones = game.mode === 'drones';
+  const isIdle = game.mode === 'idle';
   // HUD panels
-  if (duelHud) duelHud.style.display = (isDuel || isDrones) ? 'block' : 'none';
+  if (duelHud) duelHud.style.display = (isDuel || isDrones || isIdle) ? 'block' : 'none';
   if (duelHud) duelHud.classList.toggle('drones', isDrones); // hides enemy bar / block prompt via CSS
-  targetCard.style.display = (isDuel || isDrones) ? 'none' : 'block';
+  if (duelHud) duelHud.classList.toggle('idle', isIdle);     // hides player bar / block prompt via CSS
+  targetCard.style.display = (isDuel || isDrones || isIdle) ? 'none' : 'block';
+  const scoreLbl = $('scoreLbl');
+  if (scoreLbl) scoreLbl.textContent = isIdle ? 'GOLD 🪙' : 'SCORE';
+  const subEl = $('subline'), idleSubEl = $('idleSub');
+  if (subEl) subEl.style.display = isIdle ? 'none' : 'block';
+  if (idleSubEl) idleSubEl.style.display = isIdle ? 'block' : 'none';
+  const shopBtn = $('shopBtn');
+  if (shopBtn) shopBtn.style.display = isIdle ? 'block' : 'none';
+  if (!isIdle) toggleShop(false);
+  const enemyLbl = $('enemyHpLbl');
+  if (enemyLbl && isDuel) enemyLbl.textContent = 'DUMMY';
   // camera framing (duel is closer)
   if (isDuel) { camBase.set(0, 1.58, 1.5); camLookAt.set(0, 1.25, 0); }
   else { camBase.copy(CFG.camPos); camLookAt.copy(CFG.camLook); }
@@ -1883,6 +2138,15 @@ function enterArena() {
   if (game.mode === 'rush') spawnRushTarget(); else clearRushTarget();
   if (isDuel) startDuel();
   if (isDrones) startDrones();
+  if (isIdle) {
+    idle.maxHP = idleMaxHP(idle.level);
+    if (idle.hp <= 0 || idle.hp > idle.maxHP) idle.hp = idle.maxHP;
+    applyIdleTier();
+    if (idle.equip !== 'classic') selectSword(idle.equip);
+    updateIdleHUD();
+    renderShop();
+    updateDuelHUD(); // keeps duel bars sane if switching later
+  }
 }
 
 // A tap is a stab attack — unless a round is over, when it restarts.
@@ -1893,9 +2157,13 @@ function onTap() {
   triggerStab();
 }
 window.addEventListener('pointerdown', (e) => {
-  if (e.target && e.target.closest && e.target.closest('.hud-btn')) return; // ignore HUD buttons
+  if (e.target && e.target.closest && e.target.closest('.hud-btn, #shopPanel, .modal')) return; // ignore UI
   onTap();
 });
+const shopBtnEl = $('shopBtn');
+if (shopBtnEl) shopBtnEl.addEventListener('pointerdown', (e) => { e.stopPropagation(); toggleShop(); });
+const shopCloseEl = $('shopClose');
+if (shopCloseEl) shopCloseEl.addEventListener('click', () => toggleShop(false));
 
 // --- Zoom: two-finger pinch (mobile) + mouse wheel (desktop) ----------------
 window.addEventListener('wheel', (e) => { setZoom(zoomLevel * (e.deltaY > 0 ? 1.08 : 0.925)); }, { passive: true });
@@ -1944,5 +2212,6 @@ window.iSword = {
   sword, dummy, game, input, calibrate, selectMode, selectSkin, selectSword, setSwordSkin,
   spawnRushTarget, enemy, startDuel, triggerStab, triggerCombo, recordSwing, COMBOS,
   drones, spawnDrone, killDrone, startDrones, enemyArmRig, enemyHandMesh,
+  idle, idleOnHit, idleKill, buyUpgrade, buyItem, renderShop, toggleShop, idleSave, fmt,
   setDebug: (v) => { debugHit = v; debugGroup.visible = v; },
 };

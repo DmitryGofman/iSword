@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>iSword — Control Lab</title>
+  <link rel="icon" href="../favicon.svg" />
+  <style>
+    :root { --gold:#ffcf6a; --accent:#5cc8ff; --ink:#07090f; --panel:rgba(14,16,24,.82); --line:rgba(140,160,220,.22); }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    html,body { height:100%; overflow:hidden; background:#07090f; color:#eef1ff;
+      font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+    #app { position:fixed; inset:0; }
+    canvas { display:block; width:100%; height:100%; touch-action:none; }
+
+    /* top bar */
+    .top { position:fixed; top:0; left:0; right:0; z-index:10; display:flex; align-items:center; gap:12px;
+      padding:10px 14px; background:linear-gradient(#07090fcc,#07090f00); pointer-events:none; }
+    .top .brand { font-weight:800; letter-spacing:1px; font-size:16px; }
+    .top .brand b { color:var(--gold); }
+    .top .tag { color:#8b93b8; font-size:12px; }
+    .top a { pointer-events:auto; margin-left:auto; color:var(--accent); font-size:12px; text-decoration:none;
+      border:1px solid var(--line); padding:6px 10px; border-radius:9px; }
+
+    /* mode chips */
+    .modes { position:fixed; top:44px; left:0; right:0; z-index:10; display:flex; gap:8px; padding:8px 14px;
+      overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    .chip { flex:0 0 auto; cursor:pointer; border:1px solid var(--line); background:rgba(20,24,40,.7);
+      color:#cdd3e0; padding:8px 13px; border-radius:999px; font-size:13px; font-weight:600; white-space:nowrap; }
+    .chip.sel { border-color:var(--gold); color:var(--gold); box-shadow:0 0 16px rgba(255,207,106,.2); }
+
+    /* right control panel */
+    .panel { position:fixed; top:92px; right:12px; width:min(300px,84vw); z-index:10;
+      background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px;
+      backdrop-filter:blur(10px); max-height:calc(100% - 190px); overflow-y:auto; }
+    .panel.hidden { display:none; }
+    .panel h3 { font-size:13px; letter-spacing:2px; color:var(--gold); margin-bottom:4px; }
+    .panel .desc { font-size:12px; color:#9aa3b8; line-height:1.5; margin-bottom:12px; }
+    .row { margin:10px 0; }
+    .row label { display:flex; justify-content:space-between; font-size:12.5px; color:#cdd3e0; margin-bottom:5px; }
+    .row label b { color:var(--gold); font-variant-numeric:tabular-nums; }
+    input[type=range]{ width:100%; accent-color:var(--gold); }
+    .tele { margin-top:12px; border-top:1px solid var(--line); padding-top:10px; font-size:12px; }
+    .tele .t { display:flex; justify-content:space-between; color:#9aa3b8; padding:2px 0; }
+    .tele .t b { color:#eef1ff; font-variant-numeric:tabular-nums; }
+
+    /* bottom controls */
+    .bottom { position:fixed; bottom:0; left:0; right:0; z-index:10; display:flex; gap:10px; justify-content:center;
+      padding:12px 14px calc(12px + env(safe-area-inset-bottom)); background:linear-gradient(#07090f00,#07090fcc); }
+    .btn { pointer-events:auto; cursor:pointer; border:none; border-radius:12px; font-weight:800; font-size:14px;
+      padding:13px 18px; -webkit-tap-highlight-color:transparent; }
+    .btn.gold { background:linear-gradient(180deg,#ffe3a0,var(--gold)); color:#2a1c05; }
+    .btn.ghost { background:rgba(20,24,40,.8); color:#eef1ff; border:1px solid var(--line); }
+    .btn:active { transform:scale(.96); }
+    .score { position:fixed; top:92px; left:14px; z-index:10; font-size:12px; color:#9aa3b8; }
+    .score b { color:var(--gold); font-size:20px; }
+
+    .hint { position:fixed; bottom:70px; left:0; right:0; text-align:center; color:#8b93b8; font-size:12px; z-index:9; }
+    .panelToggle { position:fixed; top:92px; right:12px; z-index:11; display:none; }
+  </style>
+  <script type="importmap">
+  { "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/three/addons/" } }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div class="top">
+    <div>
+      <div class="brand">i<b>Sword</b> · Control Lab</div>
+      <div class="tag">test different sword control mechanisms</div>
+    </div>
+    <a href="../">← main game</a>
+  </div>
+
+  <div class="modes" id="modes"></div>
+
+  <div class="score">slashed <b id="score">0</b><br/><span id="hits2" style="color:#6b7392"></span></div>
+
+  <div class="panel" id="panel">
+    <h3 id="modeName">ABSOLUTE</h3>
+    <div class="desc" id="modeDesc"></div>
+    <div id="sliders"></div>
+    <div class="tele">
+      <div class="t">input <b id="tInput">—</b></div>
+      <div class="t">yaw / pitch / roll <b id="tYPR">0 / 0 / 0</b></div>
+      <div class="t">angular speed <b id="tAng">0°/s</b></div>
+      <div class="t">tip speed <b id="tTip">0.0 m/s</b></div>
+      <div class="t">frame <b id="tFps">0 ms</b></div>
+    </div>
+  </div>
+
+  <div class="hint" id="hint">Tap “Enable Motion” on a phone, or move the mouse. Slash the orbs to feel each control scheme.</div>
+
+  <div class="bottom">
+    <button class="btn gold" id="enableBtn">Enable Motion</button>
+    <button class="btn ghost" id="calBtn">Calibrate</button>
+    <button class="btn ghost" id="panelBtn">Hide panel</button>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+    const $ = (id) => document.getElementById(id);
+
+    // ---- renderer / scene ----
+    const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    $('app').appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0d16);
+    scene.fog = new THREE.Fog(0x0a0d16, 6, 20);
+    const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.05, 100);
+    camera.position.set(0, 1.55, 2.0);
+    camera.lookAt(0, 1.25, 0);
+
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.add(new THREE.HemisphereLight(0x9fb8ff, 0x161018, 0.6));
+    const key = new THREE.DirectionalLight(0xffe6c0, 2.2); key.position.set(3,6,4); scene.add(key);
+    const rim = new THREE.DirectionalLight(0x4a90ff, 1.0); rim.position.set(-4,3,-3); scene.add(rim);
+
+    // floor grid
+    const grid = new THREE.GridHelper(24, 24, 0x2a3350, 0x151a2c);
+    grid.position.y = 0; scene.add(grid);
+
+    // ---- sword ----
+    const BLADE_LEN = 0.9, GRIP = 0.135;
+    const sword = new THREE.Group();
+    const handAnchor = new THREE.Vector3(0.12, 1.15, 0.95);
+    sword.position.copy(handAnchor);
+    scene.add(sword);
+    const bladeMat = new THREE.MeshStandardMaterial({ color:0xeaf2ff, metalness:1, roughness:0.16, envMapIntensity:1.4 });
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, BLADE_LEN*0.82, 0.012), bladeMat);
+    blade.position.y = GRIP + BLADE_LEN*0.41; sword.add(blade);
+    const tipMesh = new THREE.Mesh(new THREE.ConeGeometry(0.025, BLADE_LEN*0.18, 4), bladeMat);
+    tipMesh.position.y = GRIP + BLADE_LEN*0.82 + BLADE_LEN*0.09; tipMesh.rotation.y = Math.PI/4; tipMesh.scale.z = 0.28; sword.add(tipMesh);
+    sword.add(new THREE.Mesh(new THREE.BoxGeometry(0.19,0.028,0.05), new THREE.MeshStandardMaterial({color:0xd9a441,metalness:1,roughness:0.35})));
+    const guard = sword.children[sword.children.length-1]; guard.position.y = GRIP;
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.017,0.019,GRIP,16), new THREE.MeshStandardMaterial({color:0x3a2417,roughness:0.9})); grip.position.y = GRIP/2; sword.add(grip);
+    const glow = new THREE.PointLight(0x5cc8ff, 0, 3, 2); glow.position.y = GRIP + BLADE_LEN*0.7; sword.add(glow);
+
+    const mountQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.42,0,0,'XYZ'));
+    const BLADE_BASE = new THREE.Vector3(0, GRIP, 0);
+    const BLADE_TIP = new THREE.Vector3(0, GRIP + BLADE_LEN, 0);
+
+    // trail
+    const trailGeo = new THREE.BufferGeometry();
+    const TN = 16; const tpos = new Float32Array(TN*2*3);
+    trailGeo.setAttribute('position', new THREE.BufferAttribute(tpos,3));
+    const tidx=[]; for(let i=0;i<TN-1;i++){const o=i*2; tidx.push(o,o+1,o+2,o+2,o+1,o+3);} trailGeo.setIndex(tidx);
+    const trail = new THREE.Mesh(trailGeo, new THREE.MeshBasicMaterial({color:0x9fd8ff, transparent:true, opacity:0.32, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false}));
+    trail.frustumCulled=false; scene.add(trail);
+    const trailSamples=[];
+    function pushTrail(base,tip,i){ trailSamples.push({base:base.clone(),tip:tip.clone(),i}); if(trailSamples.length>TN)trailSamples.shift();
+      for(let k=0;k<TN;k++){ const s=trailSamples[Math.min(k,trailSamples.length-1)]||trailSamples[0]; const o=k*6; if(!s){tpos[o+1]=-100;tpos[o+4]=-100;continue;}
+        tpos[o]=s.base.x;tpos[o+1]=s.base.y;tpos[o+2]=s.base.z; tpos[o+3]=s.tip.x;tpos[o+4]=s.tip.y;tpos[o+5]=s.tip.z; }
+      trailGeo.attributes.position.needsUpdate=true; }
+
+    // ---- targets ----
+    const targets=[];
+    const tGeo=new THREE.SphereGeometry(0.12,16,12);
+    for(let i=0;i<5;i++){ const m=new THREE.Mesh(tGeo, new THREE.MeshStandardMaterial({color:0x5ce08a, emissive:0x1c7a3a, emissiveIntensity:1.4, metalness:0.2, roughness:0.4}));
+      scene.add(m); targets.push({mesh:m, alive:true}); placeTarget(targets[i]); }
+    function placeTarget(t){ t.mesh.position.set((Math.random()-0.5)*1.6, 0.9+Math.random()*1.1, -0.1+Math.random()*0.5); t.mesh.visible=true; t.alive=true; t.mesh.scale.setScalar(1); }
+    let score=0;
+
+    // ---- collision (segment-segment) ----
+    const _d1=new THREE.Vector3(),_d2=new THREE.Vector3(),_r=new THREE.Vector3(),_c1=new THREE.Vector3(),_c2=new THREE.Vector3();
+    function segDist(p1,q1,p2,q2){ _d1.subVectors(q1,p1);_d2.subVectors(q2,p2);_r.subVectors(p1,p2);
+      const a=_d1.dot(_d1),e=_d2.dot(_d2),f=_d2.dot(_r); let s,t; const EPS=1e-8;
+      if(a<=EPS&&e<=EPS){s=0;t=0;} else if(a<=EPS){s=0;t=THREE.MathUtils.clamp(f/e,0,1);}
+      else{ const c=_d1.dot(_r); if(e<=EPS){t=0;s=THREE.MathUtils.clamp(-c/a,0,1);}
+        else{ const b=_d1.dot(_d2),den=a*e-b*b; s=den>EPS?THREE.MathUtils.clamp((b*f-c*e)/den,0,1):0; t=(b*s+f)/e;
+          if(t<0){t=0;s=THREE.MathUtils.clamp(-c/a,0,1);} else if(t>1){t=1;s=THREE.MathUtils.clamp((b-c)/a,0,1);} } }
+      _c1.copy(p1).addScaledVector(_d1,s); _c2.copy(p2).addScaledVector(_d2,t); return _c1.distanceTo(_c2); }
+
+    // ---- input ----
+    const zee=new THREE.Vector3(0,0,1);
+    const q1=new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
+    const _e=new THREE.Euler();
+    function deviceQ(alpha,beta,gamma,orient,out){ _e.set(beta,alpha,-gamma,'YXZ'); out.setFromEuler(_e);
+      out.multiply(q1); out.multiply(new THREE.Quaternion().setFromAxisAngle(zee,-orient)); return out; }
+
+    const input = { mode:'idle', rawQ:new THREE.Quaternion(), refInv:new THREE.Quaternion(), hasCalib:false,
+      rate:new THREE.Vector3(), mYaw:0, mPitch:0, mYawT:0, mPitchT:0, lastMove:0 };
+
+    function screenAngle(){ const so=(screen.orientation&&screen.orientation.angle)||window.orientation||0; return so*Math.PI/180; }
+    function onOrient(ev){ if(ev.alpha==null&&ev.beta==null&&ev.gamma==null) return;
+      deviceQ((ev.alpha||0)*Math.PI/180,(ev.beta||0)*Math.PI/180,(ev.gamma||0)*Math.PI/180, screenAngle(), input.rawQ);
+      input.mode='sensor'; if(!input.hasCalib){ input.refInv.copy(input.rawQ).invert(); input.hasCalib=true; } }
+    function onMotion(ev){ const r=ev.rotationRate; if(r) input.rate.set((r.beta||0)*Math.PI/180,(r.alpha||0)*Math.PI/180,(r.gamma||0)*Math.PI/180); }
+
+    async function enableMotion(){
+      const needO=typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function';
+      const needM=typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function';
+      try{ if(needO){const r=await DeviceOrientationEvent.requestPermission(); if(r!=='granted') throw 0;}
+           if(needM){await DeviceMotionEvent.requestPermission();} }catch{ $('hint').textContent='Motion blocked — use the mouse instead.'; }
+      addEventListener('deviceorientation', onOrient, true);
+      addEventListener('devicemotion', onMotion, true);
+      $('hint').textContent='Calibrate with the blade pointing up, then swing!';
+    }
+    // mouse
+    addEventListener('pointermove',(e)=>{ if(e.pointerType==='touch') return; const nx=e.clientX/innerWidth*2-1, ny=e.clientY/innerHeight*2-1;
+      const now=performance.now(); const dt=Math.max(1,now-input.lastMove); input.lastMove=now;
+      const nyaw=-nx*1.4, npitch=-ny*1.3;
+      input.rate.set((npitch-input.mPitchT)/dt*1000,(nyaw-input.mYawT)/dt*1000,0);
+      input.mYawT=nyaw; input.mPitchT=npitch; if(input.mode==='idle') input.mode='mouse'; });
+
+    function calibrate(){ input.refInv.copy(input.rawQ).invert(); input.hasCalib=true; $('hint').textContent='Calibrated — swing!'; }
+
+    // ---- control modes ----
+    const PARAMS = {
+      smoothing:{label:'Smoothing (lag)', min:0, max:0.92, step:0.01, val:0.4},
+      sensitivity:{label:'Sensitivity', min:0.5, max:3, step:0.05, val:1.4},
+      stiffness:{label:'Spring stiffness', min:20, max:320, step:5, val:130},
+      damping:{label:'Spring damping', min:2, max:44, step:1, val:16},
+      deadzone:{label:'Deadzone (°)', min:0, max:14, step:0.5, val:2},
+    };
+    const P = (k)=>PARAMS[k].val;
+    const MODES = [
+      {id:'absolute', name:'Absolute 1:1', params:['deadzone'],
+        desc:'Sword orientation copies your phone exactly. Lowest latency and most direct — but every hand jitter shows up on the blade.'},
+      {id:'smoothed', name:'Smoothed', params:['smoothing','deadzone'],
+        desc:'Absolute mapping run through a low-pass filter. Steadier and less jittery, at the cost of a little lag. Tune Smoothing to taste.'},
+      {id:'amplified', name:'Amplified', params:['sensitivity','smoothing'],
+        desc:'Small wrist motions become big swings — less effort per hit. Great for couch play; can feel twitchy if too high.'},
+      {id:'spring', name:'Springy blade', params:['stiffness','damping'],
+        desc:'The blade eases toward your aim with real momentum and weight. Stiffer = snappier, lower damping = more overshoot/whip.'},
+      {id:'rate', name:'Rate / gyro', params:['sensitivity'],
+        desc:'Angular velocity spins the blade — no absolute reference, so it drifts, but flicks feel instant. Recalibrate to re-center.'},
+    ];
+    let mode = MODES[0];
+    const omega = new THREE.Vector3(); // for spring mode
+
+    function renderModes(){ const el=$('modes'); el.innerHTML='';
+      MODES.forEach(m=>{ const c=document.createElement('div'); c.className='chip'+(m===mode?' sel':''); c.textContent=m.name;
+        c.onclick=()=>{ mode=m; omega.set(0,0,0); renderModes(); renderSliders(); }; el.appendChild(c); }); }
+    function renderSliders(){ $('modeName').textContent=mode.name.toUpperCase(); $('modeDesc').textContent=mode.desc;
+      const s=$('sliders'); s.innerHTML='';
+      mode.params.forEach(k=>{ const p=PARAMS[k]; const row=document.createElement('div'); row.className='row';
+        row.innerHTML=`<label>${p.label}<b id="v_${k}">${p.val}</b></label><input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.val}">`;
+        const inp=row.querySelector('input'); inp.oninput=()=>{ p.val=parseFloat(inp.value); $('v_'+k).textContent=p.val; }; s.appendChild(row); }); }
+
+    // helpers
+    const _rel=new THREE.Quaternion(), _target=new THREE.Quaternion(), _tmp=new THREE.Quaternion(), _axis=new THREE.Vector3(), _dq=new THREE.Quaternion();
+    function relQuat(out){
+      if(input.mode==='mouse'){ input.mYaw+=(input.mYawT-input.mYaw)*0.4; input.mPitch+=(input.mPitchT-input.mPitch)*0.4;
+        out.setFromEuler(new THREE.Euler(input.mPitch, input.mYaw, 0,'YXZ')); }
+      else out.copy(input.refInv).multiply(input.rawQ);
+      return out;
+    }
+    function axisAngle(q){ const w=THREE.MathUtils.clamp(q.w,-1,1); let ang=2*Math.acos(w); const s=Math.sqrt(1-w*w);
+      if(s<1e-5){ _axis.set(1,0,0); ang=0; } else _axis.set(q.x/s,q.y/s,q.z/s); if(ang>Math.PI) ang-=2*Math.PI; return ang; }
+    function applyDeadzone(rel){ const dz=P('deadzone')*Math.PI/180; if(dz<=0) return rel; const ang=axisAngle(rel);
+      const na=Math.sign(ang)*Math.max(0, Math.abs(ang)-dz); _dq.setFromAxisAngle(_axis, na); return _dq; }
+
+    let prevTip=new THREE.Vector3(), haveTip=false, tipSpeed=0, angSpeed=0, prevQ=new THREE.Quaternion();
+
+    function updateControl(dt){
+      relQuat(_rel);
+      if(mode.id==='rate'){
+        const r = input.rate.length()*P('sensitivity');
+        if(r>0.001){ _axis.copy(input.rate).normalize(); _dq.setFromAxisAngle(_axis, input.rate.length()*P('sensitivity')*dt*(input.mode==='mouse'?1:1)); sword.quaternion.multiply(_dq); }
+        return;
+      }
+      _target.copy(mountQ).multiply(applyDeadzone(_rel));
+      if(mode.id==='amplified'){ const ang=axisAngle(_rel)*P('sensitivity'); _dq.setFromAxisAngle(_axis, ang); _target.copy(mountQ).multiply(_dq); }
+      if(mode.id==='absolute'){ sword.quaternion.copy(_target); return; }
+      if(mode.id==='smoothed'||mode.id==='amplified'){ const f=THREE.MathUtils.clamp(1-Math.pow(P('smoothing'),dt*60),0,1); sword.quaternion.slerp(_target, f||1); return; }
+      if(mode.id==='spring'){
+        _tmp.copy(_target).multiply(sword.quaternion.clone().invert()); // delta current->target (world)
+        const ang=axisAngle(_tmp);
+        const k=P('stiffness'), c=P('damping');
+        // angular acceleration toward target, damped
+        omega.addScaledVector(_axis, k*ang*dt);
+        omega.multiplyScalar(Math.max(0,1-c*dt));
+        const om=omega.length();
+        if(om>1e-5){ _axis.copy(omega).normalize(); _dq.setFromAxisAngle(_axis, om*dt); sword.quaternion.premultiply(_dq); }
+        return;
+      }
+    }
+
+    // ---- loop ----
+    const clock=new THREE.Clock();
+    const curTip=new THREE.Vector3(), curBase=new THREE.Vector3(), curMid=new THREE.Vector3();
+    let fpsMs=0;
+    function frame(){
+      requestAnimationFrame(frame);
+      const dt=Math.min(0.05, clock.getDelta());
+      fpsMs = fpsMs*0.9 + dt*1000*0.1;
+
+      updateControl(dt);
+      sword.position.copy(handAnchor);
+
+      curBase.copy(BLADE_BASE).applyQuaternion(sword.quaternion).add(sword.position);
+      curTip.copy(BLADE_TIP).applyQuaternion(sword.quaternion).add(sword.position);
+      curMid.copy(BLADE_BASE).lerp(BLADE_TIP,0.62).applyQuaternion(sword.quaternion).add(sword.position);
+      if(haveTip&&dt>0){ tipSpeed = curTip.distanceTo(prevTip)/dt; }
+      // angular speed from quaternion delta
+      _tmp.copy(sword.quaternion).multiply(prevQ.clone().invert()); angSpeed = Math.abs(axisAngle(_tmp))/Math.max(dt,1e-3)*180/Math.PI;
+      prevQ.copy(sword.quaternion);
+
+      pushTrail(curMid, curTip, THREE.MathUtils.clamp((tipSpeed-1.5)/8,0,1));
+      trail.material.opacity = 0.12 + THREE.MathUtils.clamp((tipSpeed-1.5)/12,0,1)*0.4;
+      glow.intensity = THREE.MathUtils.clamp((tipSpeed-2)/8,0,1)*2;
+
+      // slash targets (swept: prevTip->curTip segment vs orb)
+      for(const t of targets){ if(!t.alive) continue;
+        const d = Math.min(segDist(curBase,curTip,t.mesh.position,t.mesh.position), haveTip?segDist(prevTip,curTip,t.mesh.position,t.mesh.position):9);
+        if(d < 0.12+0.05 && tipSpeed>1.5){ t.alive=false; t.mesh.visible=false; score++; $('score').textContent=score;
+          setTimeout(()=>placeTarget(t), 300+Math.random()*400); }
+        else { t.mesh.rotation.y+=dt*1.5; t.mesh.material.emissiveIntensity=1.2+Math.sin(performance.now()*0.005+t.mesh.position.x)*0.4; }
+      }
+
+      prevTip.copy(curTip); haveTip=true;
+
+      // telemetry
+      _e.setFromQuaternion(sword.quaternion,'YXZ');
+      $('tInput').textContent = input.mode==='sensor'?'phone IMU':input.mode==='mouse'?'mouse':'—';
+      $('tYPR').textContent = `${(_e.y*57.3|0)} / ${(_e.x*57.3|0)} / ${(_e.z*57.3|0)}`;
+      $('tAng').textContent = `${angSpeed|0}°/s`;
+      $('tTip').textContent = `${tipSpeed.toFixed(1)} m/s`;
+      $('tFps').textContent = `${fpsMs.toFixed(1)} ms`;
+
+      renderer.render(scene,camera);
+    }
+    frame();
+
+    addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+
+    // ---- UI wiring ----
+    renderModes(); renderSliders();
+    $('enableBtn').onclick = enableMotion;
+    $('calBtn').onclick = calibrate;
+    // tap-to-calibrate on touch
+    addEventListener('pointerdown',(e)=>{ if(e.target.closest('.btn,.chip,.panel,.top')) return; if(e.pointerType==='touch') calibrate(); });
+    $('panelBtn').onclick = ()=>{ const p=$('panel'); p.classList.toggle('hidden'); $('panelBtn').textContent = p.classList.contains('hidden')?'Show panel':'Hide panel'; };
+
+    // expose for tinkering
+    window.lab = { input, MODES, PARAMS, setMode:(id)=>{ mode=MODES.find(m=>m.id===id)||mode; renderModes(); renderSliders(); }, get score(){return score;} };
+  </script>
+</body>
+</html>

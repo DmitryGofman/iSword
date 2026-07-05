@@ -93,11 +93,21 @@ public/
 - **Free Training** — swing freely; every strike scores, chain hits for combos.
 - **Target Rush** — a weak point lights up; strike it in succession before it fades.
 - **Duel** — the dummy fights back with four kinds of swings (overhead, two
-  cross slashes, thrust). Block its blade with yours to parry, or take the hit.
-  Player + enemy health, victory / defeat, tap to rematch.
+  cross slashes, thrust) and a moving sword-arm. Block its blade with yours to
+  parry, or take the hit. Player + enemy health, victory / defeat, tap to rematch.
+- **Drone Slayer** — drones swarm in from the dark; slash them out of the air
+  before they reach you.
 
-Plus selectable **dummy skins** (Oak / Iron / Gold) and **sword skins**
-(Classic / Katana / Fire / Ice), and zoom in/out (buttons, wheel, or pinch).
+## Controls & extras
+
+- **Tap** the screen to **stab** (a forward thrust).
+- **Pinch** two fingers (or mouse wheel) to zoom in/out.
+- **Combo attacks** — chain swings to unleash a finisher; the list is in
+  Settings (⚙): Cross Slash `← → ← →`, Rising Dragon `↓ ↓ ↑`, Skewer `⊙ ⊙ ⊙`,
+  and Blade Flurry (any 4 fast swings).
+- Selectable **dummy skins** (Oak / Iron / Gold) and **sword skins**
+  (Classic / Katana / Fire / Ice).
+- Settings has a **Show hitboxes** debug toggle to see the real collision volumes.
 
 ## Roadmap
 

@@ -126,6 +126,16 @@
     .skin-opt .nm { font-size: 12px; color: #9aa3b8; margin-top: 6px; }
     .skin-opt.sel .nm { color: var(--gold); }
 
+    .swords { display: flex; gap: 20px; justify-content: center; }
+    .sword-opt { cursor: pointer; text-align: center; }
+    .sword-opt .blade { width: 12px; height: 52px; margin: 0 auto; border-radius: 3px 3px 2px 2px;
+      border: 1px solid rgba(255,255,255,.18); transition: transform .12s; }
+    .sword-opt .blade.katana { width: 9px; border-radius: 3px 3px 6px 2px; }
+    .sword-opt:hover .blade { transform: scale(1.08); }
+    .sword-opt.sel .blade { outline: 2px solid var(--gold); outline-offset: 3px; }
+    .sword-opt .nm { font-size: 12px; color: #9aa3b8; margin-top: 9px; }
+    .sword-opt.sel .nm { color: var(--gold); }
+
     .feats { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
     .feat { flex: 1; min-width: 120px; }
     .feat .fi { font-size: 22px; } .feat .ft { font-size: 12.5px; font-weight: 700; color: #cdd3e0; margin-top: 4px; }
@@ -207,6 +217,14 @@
           <div class="ico">🎯</div><div class="nm">Target Rush</div>
           <div class="ds">A weak point lights up — strike it in succession before it fades.</div>
         </div>
+      </div>
+
+      <div class="section-h">Your blade</div>
+      <div class="swords">
+        <div class="sword-opt sel" data-sword="classic"><div class="blade" style="background:linear-gradient(180deg,#f2f6ff,#9fb0c8)"></div><div class="nm">Classic</div></div>
+        <div class="sword-opt" data-sword="katana"><div class="blade katana" style="background:linear-gradient(180deg,#eef2f8,#8b97a8)"></div><div class="nm">Katana</div></div>
+        <div class="sword-opt" data-sword="fire"><div class="blade" style="background:linear-gradient(180deg,#ffe0a0,#ff4d10);box-shadow:0 0 16px #ff5a20"></div><div class="nm">Fire</div></div>
+        <div class="sword-opt" data-sword="ice"><div class="blade" style="background:linear-gradient(180deg,#eafaff,#4aa8d8);box-shadow:0 0 16px #5cc8ff"></div><div class="nm">Ice</div></div>
       </div>
 
       <div class="section-h">Dummy skin</div>

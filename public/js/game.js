@@ -234,10 +234,23 @@ pommel.position.y = 0;
 pommel.castShadow = true;
 sword.add(pommel);
 
+// round tsuba guard (shown only for the katana skin)
+const tsuba = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.058, 0.014, 24), guardMat);
+tsuba.rotation.x = Math.PI / 2;
+tsuba.position.y = CFG.gripLength;
+tsuba.visible = false;
+tsuba.castShadow = true;
+sword.add(tsuba);
+
 // combo glow light riding the blade
 const bladeGlow = new THREE.PointLight(0x5cc8ff, 0, 3.5, 2);
 bladeGlow.position.y = CFG.gripLength + CFG.bladeLength * 0.7;
 sword.add(bladeGlow);
+
+// persistent effect light for fire / ice blades (independent of combo glow)
+const fxLight = new THREE.PointLight(0xff5a20, 0, 2.8, 2);
+fxLight.position.y = CFG.gripLength + CFG.bladeLength * 0.55;
+sword.add(fxLight);
 
 const mountQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.42, 0, 0, 'XYZ'));
 
@@ -360,26 +373,27 @@ const dummy = { leanX: 0, leanZ: 0, twist: 0, velX: 0, velZ: 0, velT: 0, hitPuls
 // Lit target marker (Target Rush mode) — a glowing weak-point on the dummy
 // ---------------------------------------------------------------------------
 function makeTargetMarker() {
+  // Kept small so it marks the weak-point without obscuring the dummy.
   const g = new THREE.Group();
-  const ringGeo = new THREE.RingGeometry(0.12, 0.16, 32);
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0xff4d6d, transparent: true, opacity: 0.9, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthTest: false });
+  const ringGeo = new THREE.RingGeometry(0.058, 0.08, 32);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xff4d6d, transparent: true, opacity: 0.95, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthTest: false });
   const rings = new THREE.Mesh(ringGeo, ringMat);
   g.add(rings);
   const core = new THREE.Mesh(
-    new THREE.CircleGeometry(0.07, 24),
-    new THREE.MeshBasicMaterial({ color: 0xffe0a0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthTest: false })
+    new THREE.CircleGeometry(0.032, 20),
+    new THREE.MeshBasicMaterial({ color: 0xffe0a0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthTest: false })
   );
   g.add(core);
   // crosshair ticks
   const tickMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthTest: false });
   for (let i = 0; i < 4; i++) {
-    const t = new THREE.Mesh(new THREE.PlaneGeometry(0.02, 0.06), tickMat);
-    t.position.set(Math.cos(i * Math.PI / 2) * 0.19, Math.sin(i * Math.PI / 2) * 0.19, 0);
+    const t = new THREE.Mesh(new THREE.PlaneGeometry(0.012, 0.032), tickMat);
+    t.position.set(Math.cos(i * Math.PI / 2) * 0.098, Math.sin(i * Math.PI / 2) * 0.098, 0);
     t.rotation.z = i * Math.PI / 2;
     g.add(t);
   }
   // countdown ring (scales down over target lifetime)
-  const timerGeo = new THREE.RingGeometry(0.17, 0.2, 32);
+  const timerGeo = new THREE.RingGeometry(0.088, 0.104, 32);
   const timerMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthTest: false });
   const timer = new THREE.Mesh(timerGeo, timerMat);
   g.add(timer);
@@ -395,7 +409,7 @@ const rush = {
   active: false,
   cap: null,          // capsule meta being targeted
   worldPos: new THREE.Vector3(),
-  radius: 0.22,
+  radius: 0.17,       // hit tolerance (a bit larger than the marker — phone aim)
   mult: 1,
   time: 0,            // remaining seconds
   maxTime: 3.2,
@@ -497,39 +511,44 @@ const trail = new Trail();
 // ---------------------------------------------------------------------------
 // Hit particles
 // ---------------------------------------------------------------------------
-const MAX_P = 320;
+const MAX_P = 340;
 const pPos = new Float32Array(MAX_P * 3);
+const pCol = new Float32Array(MAX_P * 3);
 const pGeo = new THREE.BufferGeometry();
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
 const sparkTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const x = c.getContext('2d');
   const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.3, 'rgba(255,224,150,0.9)');
-  g.addColorStop(1, 'rgba(255,120,60,0)');
+  g.addColorStop(0.35, 'rgba(255,255,255,0.85)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
   x.fillStyle = g; x.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
 })();
 const pMat = new THREE.PointsMaterial({
   size: 0.15, map: sparkTex, transparent: true, blending: THREE.AdditiveBlending,
-  depthWrite: false, sizeAttenuation: true,
+  depthWrite: false, sizeAttenuation: true, vertexColors: true,
 });
 const points = new THREE.Points(pGeo, pMat);
 points.frustumCulled = false;
 scene.add(points);
 const sparks = [];
+const _sparkCol = new THREE.Color();
 for (let i = 0; i < MAX_P; i++) pPos[i * 3 + 1] = -1000;
 
-function burst(pos, dir, power) {
-  const count = Math.min(36, 12 + Math.floor(power * 0.28));
+const WARM = 0xffcf7a;
+function burst(pos, dir, power, color = WARM, spread = 3.4) {
+  const count = Math.min(40, 12 + Math.floor(power * 0.3));
+  _sparkCol.setHex(color);
   for (let i = 0; i < count; i++) {
     if (sparks.length >= MAX_P) break;
     const v = dir.clone().multiplyScalar(1.5 + Math.random() * 3.0 * (power / 60));
-    v.x += (Math.random() - 0.5) * 3.4;
-    v.y += (Math.random() - 0.5) * 3.4 + 1.4;
-    v.z += (Math.random() - 0.5) * 3.4;
-    sparks.push({ pos: pos.clone(), vel: v, life: 0, max: 0.35 + Math.random() * 0.35 });
+    v.x += (Math.random() - 0.5) * spread;
+    v.y += (Math.random() - 0.5) * spread + 1.4;
+    v.z += (Math.random() - 0.5) * spread;
+    sparks.push({ pos: pos.clone(), vel: v, life: 0, max: 0.35 + Math.random() * 0.35, r: _sparkCol.r, g: _sparkCol.g, b: _sparkCol.b });
   }
 }
 function updateSparks(dt) {
@@ -542,11 +561,175 @@ function updateSparks(dt) {
   }
   for (let i = 0; i < MAX_P; i++) {
     if (i < sparks.length) {
-      const p = sparks[i].pos;
-      pPos[i * 3] = p.x; pPos[i * 3 + 1] = p.y; pPos[i * 3 + 2] = p.z;
+      const s = sparks[i];
+      const k = 1 - s.life / s.max;
+      pPos[i * 3] = s.pos.x; pPos[i * 3 + 1] = s.pos.y; pPos[i * 3 + 2] = s.pos.z;
+      pCol[i * 3] = s.r * k; pCol[i * 3 + 1] = s.g * k; pCol[i * 3 + 2] = s.b * k;
     } else pPos[i * 3 + 1] = -1000;
   }
   pGeo.attributes.position.needsUpdate = true;
+  pGeo.attributes.color.needsUpdate = true;
+}
+
+// ---------------------------------------------------------------------------
+// Fire embers (continuous drift from a fire blade) + ice shards (on ice hit)
+// ---------------------------------------------------------------------------
+const MAX_E = 140;
+const ePos = new Float32Array(MAX_E * 3);
+const eCol = new Float32Array(MAX_E * 3);
+const eGeo = new THREE.BufferGeometry();
+eGeo.setAttribute('position', new THREE.BufferAttribute(ePos, 3));
+eGeo.setAttribute('color', new THREE.BufferAttribute(eCol, 3));
+const emberMat = new THREE.PointsMaterial({ size: 0.1, map: sparkTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true, vertexColors: true });
+const emberPoints = new THREE.Points(eGeo, emberMat);
+emberPoints.frustumCulled = false;
+scene.add(emberPoints);
+const embers = [];
+for (let i = 0; i < MAX_E; i++) ePos[i * 3 + 1] = -1000;
+const _emberAt = new THREE.Vector3();
+function emitEmber(worldPoint) {
+  if (embers.length >= MAX_E) return;
+  const hot = Math.random();
+  embers.push({
+    pos: worldPoint.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.05, (Math.random() - 0.5) * 0.05, (Math.random() - 0.5) * 0.05)),
+    vel: new THREE.Vector3((Math.random() - 0.5) * 0.4, 0.5 + Math.random() * 0.8, (Math.random() - 0.5) * 0.4),
+    life: 0, max: 0.5 + Math.random() * 0.5,
+    r: 1.0, g: 0.45 + hot * 0.3, b: 0.1 * hot,
+  });
+}
+function updateEmbers(dt) {
+  for (let i = embers.length - 1; i >= 0; i--) {
+    const e = embers[i];
+    e.life += dt;
+    if (e.life >= e.max) { embers.splice(i, 1); continue; }
+    e.vel.y += 1.2 * dt; // embers accelerate upward slightly
+    e.pos.addScaledVector(e.vel, dt);
+  }
+  for (let i = 0; i < MAX_E; i++) {
+    if (i < embers.length) {
+      const e = embers[i];
+      const k = 1 - e.life / e.max;
+      ePos[i * 3] = e.pos.x; ePos[i * 3 + 1] = e.pos.y; ePos[i * 3 + 2] = e.pos.z;
+      eCol[i * 3] = e.r * k; eCol[i * 3 + 1] = e.g * k; eCol[i * 3 + 2] = e.b * k;
+    } else ePos[i * 3 + 1] = -1000;
+  }
+  eGeo.attributes.position.needsUpdate = true;
+  eGeo.attributes.color.needsUpdate = true;
+}
+
+// Ice shards — pooled small crystals that burst and fall on an ice-blade hit.
+const iceShards = [];
+const shardGeo = new THREE.OctahedronGeometry(0.05, 0);
+const shardMat = new THREE.MeshStandardMaterial({ color: 0xcdeeff, emissive: 0x2a80b0, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.9, flatShading: true });
+for (let i = 0; i < 26; i++) {
+  const m = new THREE.Mesh(shardGeo, shardMat.clone());
+  m.visible = false;
+  scene.add(m);
+  iceShards.push({ mesh: m, vel: new THREE.Vector3(), spin: new THREE.Vector3(), life: 0, max: 0, active: false });
+}
+function spawnIceShards(worldPoint, dir, power) {
+  let spawned = 0;
+  for (const sh of iceShards) {
+    if (sh.active) continue;
+    sh.active = true;
+    sh.life = 0; sh.max = 0.5 + Math.random() * 0.4;
+    sh.mesh.visible = true;
+    sh.mesh.position.copy(worldPoint);
+    const s = 0.6 + Math.random() * 0.9;
+    sh.mesh.scale.setScalar(s);
+    const v = dir.clone().multiplyScalar(1.5 + Math.random() * 2.5 * (power / 60));
+    v.x += (Math.random() - 0.5) * 3; v.y += Math.random() * 2.4 + 0.6; v.z += (Math.random() - 0.5) * 3;
+    sh.vel.copy(v);
+    sh.spin.set((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12);
+    sh.baseScale = s;
+    if (++spawned >= 10) break;
+  }
+}
+function updateIceShards(dt) {
+  for (const sh of iceShards) {
+    if (!sh.active) continue;
+    sh.life += dt;
+    if (sh.life >= sh.max) { sh.active = false; sh.mesh.visible = false; continue; }
+    sh.vel.y -= 9.8 * dt;
+    sh.mesh.position.addScaledVector(sh.vel, dt);
+    sh.mesh.rotation.x += sh.spin.x * dt;
+    sh.mesh.rotation.y += sh.spin.y * dt;
+    const k = 1 - sh.life / sh.max;
+    sh.mesh.material.opacity = 0.9 * k;
+    sh.mesh.scale.setScalar(sh.baseScale * (0.5 + 0.5 * k));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sword skins — Classic, Katana, Fire, Ice
+// ---------------------------------------------------------------------------
+const SWORD_SKINS = {
+  classic: {
+    label: 'Classic', swatch: 'linear-gradient(180deg,#f2f6ff,#9fb0c8)',
+    blade: { color: 0xeaf2ff, metalness: 1.0, roughness: 0.16, emissive: 0x000000, ei: 0 },
+    guard: 'cross', guardColor: 0xd9a441, gripColor: 0x3a2417, width: 1.0,
+    trail: 0x9fd8ff, effect: null, fx: { color: 0x000000, intensity: 0 }, spark: WARM,
+  },
+  katana: {
+    label: 'Katana', swatch: 'linear-gradient(180deg,#e7edf5,#8b97a8)',
+    blade: { color: 0xdfe8f2, metalness: 1.0, roughness: 0.1, emissive: 0x000000, ei: 0 },
+    guard: 'tsuba', guardColor: 0x191919, gripColor: 0x5a1420, width: 0.68,
+    trail: 0xffe0b0, effect: null, fx: { color: 0x000000, intensity: 0 }, spark: 0xfff0d0,
+  },
+  fire: {
+    label: 'Fire', swatch: 'linear-gradient(180deg,#ffd08a,#ff4d10)',
+    blade: { color: 0xffb45c, metalness: 0.5, roughness: 0.32, emissive: 0xff4a10, ei: 1.2 },
+    guard: 'cross', guardColor: 0x6a2a10, gripColor: 0x2a1206, width: 1.0,
+    trail: 0xff7a2c, effect: 'fire', fx: { color: 0xff5a20, intensity: 2.8 }, spark: 0xff6a1e,
+  },
+  ice: {
+    label: 'Ice', swatch: 'linear-gradient(180deg,#eafaff,#4aa8d8)',
+    blade: { color: 0xbfeaff, metalness: 0.55, roughness: 0.08, emissive: 0x1f88c0, ei: 0.85 },
+    guard: 'cross', guardColor: 0x2a5a70, gripColor: 0x123040, width: 1.0,
+    trail: 0x9fe8ff, effect: 'ice', fx: { color: 0x5cc8ff, intensity: 2.2 }, spark: 0x9fe8ff,
+  },
+};
+let swordEffect = null;
+let swordTrailColor = 0x9fd8ff;
+let swordSparkColor = WARM;
+let currentSword = 'classic';
+
+function setSwordSkin(id) {
+  const sk = SWORD_SKINS[id] || SWORD_SKINS.classic;
+  currentSword = id;
+  bladeMat.color.setHex(sk.blade.color);
+  bladeMat.metalness = sk.blade.metalness;
+  bladeMat.roughness = sk.blade.roughness;
+  bladeMat.emissive.setHex(sk.blade.emissive);
+  bladeMat.emissiveIntensity = sk.blade.ei;
+  fuller.material.color.setHex(sk.blade.color);
+  fuller.material.emissive.setHex(sk.blade.emissive);
+  fuller.material.emissiveIntensity = sk.blade.ei * 0.6;
+  guardMat.color.setHex(sk.guardColor);
+  gripMat.color.setHex(sk.gripColor);
+  const katana = sk.guard === 'tsuba';
+  guard.visible = !katana;
+  pommel.visible = !katana;
+  tsuba.visible = katana;
+  bladeMain.scale.x = sk.width;
+  fuller.scale.x = sk.width;
+  bladeTip.scale.x = sk.width;
+  fxLight.color.setHex(sk.fx.color);
+  fxLight.intensity = sk.fx.intensity;
+  swordEffect = sk.effect;
+  swordTrailColor = sk.trail;
+  swordSparkColor = sk.spark;
+  if (game.combo < 2) trail.color.setHex(swordTrailColor);
+}
+
+function swordHitFX(worldPoint, dir, power) {
+  if (swordEffect === 'fire') {
+    for (let i = 0; i < 12; i++) emitEmber(worldPoint);
+    impactLight.color.setHex(0xff6a20);
+  } else if (swordEffect === 'ice') {
+    spawnIceShards(worldPoint, dir, power);
+    impactLight.color.setHex(0x8fd6ff);
+  }
 }
 
 const impactLight = new THREE.PointLight(0xffd9a0, 0, 6, 2);
@@ -787,8 +970,11 @@ function updateComboUI() {
   } else {
     comboWrap.classList.remove('show');
     bladeGlow.intensity = 0;
-    bladeMat.emissive.setHex(0x000000);
-    trail.color.setHex(0x9fd8ff);
+    // restore the sword skin's own blade emissive (fire/ice glow)
+    const sk = SWORD_SKINS[currentSword] || SWORD_SKINS.classic;
+    bladeMat.emissive.setHex(sk.blade.emissive);
+    bladeMat.emissiveIntensity = sk.blade.ei;
+    trail.color.setHex(swordTrailColor);
     ring.material.color.setHex(ringBaseColor);
     game.lastTier = -1;
   }
@@ -832,7 +1018,7 @@ function registerHit(cap, power, worldPoint, dir, metal) {
       spawnRushTarget();           // immediately light the next one
     } else {
       // glancing off-target hit: small feedback, no combo, keep the chain alive
-      burst(worldPoint, dir, power * 0.4);
+      burst(worldPoint, dir, power * 0.4, swordSparkColor);
       playHit(power * 0.5, metal);
       applyImpulse(worldPoint, dir, power * 0.5);
       spawnDamageNumber(worldPoint, '' + Math.round(power * 0.6), 'graze');
@@ -868,10 +1054,11 @@ function registerHit(cap, power, worldPoint, dir, metal) {
   else if (isPerfect && game.combo < 5) announce('PERFECT!', '#a48bff');
 
   // effects
-  burst(worldPoint, dir, power);
+  burst(worldPoint, dir, power, swordSparkColor);
   impactLight.color.setHex(isHead ? 0xff9db0 : 0xffd9a0);
   impactLight.position.copy(worldPoint);
   impactLight.intensity = 4 + power * 0.06;
+  swordHitFX(worldPoint, dir, power);
   playHit(power, metal || currentSkin !== 'oak');
   flashEl.style.background = `radial-gradient(circle at 50% 55%, rgba(255,240,210,${Math.min(0.3, power / 240)}), rgba(255,255,255,0) 60%)`;
   clearTimeout(registerHit._f);
@@ -1036,6 +1223,15 @@ function animate() {
   updateDummy(dt);
   updateRush(dt);
   updateSparks(dt);
+
+  // fire blade continuously sheds embers along its length
+  if (swordEffect === 'fire' && game.running) {
+    emitEmber(curTrailInner);
+    if (Math.random() < 0.6) emitEmber(curBase.clone().lerp(curTip, 0.45));
+    fxLight.intensity = 2.4 + Math.sin(animTime * 22) * 0.7;
+  }
+  updateEmbers(dt);
+  updateIceShards(dt);
   impactLight.intensity *= 0.86;
 
   // brazier flicker
@@ -1106,10 +1302,16 @@ function selectSkin(id) {
   applySkin(id);
   document.querySelectorAll('.skin-opt').forEach((el) => el.classList.toggle('sel', el.dataset.skin === id));
 }
+function selectSword(id) {
+  setSwordSkin(id);
+  document.querySelectorAll('.sword-opt').forEach((el) => el.classList.toggle('sel', el.dataset.sword === id));
+}
 document.querySelectorAll('.mode-opt').forEach((el) => el.addEventListener('click', () => selectMode(el.dataset.mode)));
 document.querySelectorAll('.skin-opt').forEach((el) => el.addEventListener('click', () => selectSkin(el.dataset.skin)));
+document.querySelectorAll('.sword-opt').forEach((el) => el.addEventListener('click', () => selectSword(el.dataset.sword)));
 selectMode('free');
 selectSkin('oak');
+selectSword('classic');
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -1158,4 +1360,4 @@ if (LOCAL_MODE) {
   setupNetworked();
 }
 
-window.iSword = { sword, dummy, game, input, calibrate, selectMode, selectSkin, spawnRushTarget };
+window.iSword = { sword, dummy, game, input, calibrate, selectMode, selectSkin, selectSword, setSwordSkin, spawnRushTarget };

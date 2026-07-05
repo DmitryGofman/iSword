@@ -23,6 +23,7 @@ const CFG = {
   springC: 5.2,             // dummy damping
   maxLean: 0.6,             // rad
   bladeRadius: 0.05,        // collision fatness of the blade
+  comboWindowMs: 1500,      // time to keep a combo alive
 };
 
 const params = new URLSearchParams(location.search);
@@ -43,13 +44,28 @@ const roomCodeEl = $('roomCode');
 const joinUrlEl = $('joinUrl');
 const qrBox = $('qrBox');
 const localHint = $('localHint');
+const flashEl = $('flash');
+const dmgLayer = $('dmg');
+
+// HUD readouts
+const scoreN = $('scoreN');
 const hitsN = $('hitsN');
 const bestComboEl = $('bestCombo');
 const speedN = $('speedN');
 const powerFill = $('powerFill');
-const comboText = $('comboText');
-const hintPill = $('hintPill');
-const flashEl = $('flash');
+const comboWrap = $('comboWrap');
+const comboN = $('comboN');
+const comboTierEl = $('comboTier');
+const comboMeterFill = $('comboMeterFill');
+const targetCard = $('targetCard');
+const targetPartEl = $('targetPart');
+const targetMultEl = $('targetMult');
+const targetTimer = $('targetTimer');
+const bannerHint = $('bannerHint');
+const bannerTitle = $('bannerTitle');
+const popText = $('popText');
+
+function setHint(html) { if (bannerHint) bannerHint.innerHTML = html; }
 
 // ---------------------------------------------------------------------------
 // Renderer / scene / camera
@@ -59,30 +75,29 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 1.1;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 appEl.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0d17);
-scene.fog = new THREE.Fog(0x0a0d17, 8, 26);
+scene.background = new THREE.Color(0x07090f);
+scene.fog = new THREE.Fog(0x07090f, 7, 24);
 
 const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.05, 100);
 camera.position.copy(CFG.camPos);
 camera.lookAt(CFG.camLook);
 
-// Environment reflections for the metal blade.
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 // ---------------------------------------------------------------------------
-// Lighting
+// Lighting — warm, dramatic, gold key with cool rim
 // ---------------------------------------------------------------------------
-const hemi = new THREE.HemisphereLight(0x9fb8ff, 0x1a1522, 0.55);
+const hemi = new THREE.HemisphereLight(0x8fb0ff, 0x120d08, 0.4);
 scene.add(hemi);
 
-const key = new THREE.DirectionalLight(0xfff2df, 2.1);
+const key = new THREE.DirectionalLight(0xffe6c0, 2.4);
 key.position.set(3.5, 7, 4.5);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
@@ -94,13 +109,28 @@ key.shadow.bias = -0.0004;
 key.shadow.normalBias = 0.02;
 scene.add(key);
 
-const rim = new THREE.DirectionalLight(0x5cc8ff, 0.9);
+const rim = new THREE.DirectionalLight(0x4a90ff, 1.1);
 rim.position.set(-5, 4, -3);
 scene.add(rim);
 
-const fill = new THREE.PointLight(0xff8a5c, 0.5, 20, 2);
-fill.position.set(-2, 2.2, 3);
+const fill = new THREE.PointLight(0xffb060, 0.6, 20, 2);
+fill.position.set(-2, 2.4, 3);
 scene.add(fill);
+
+// two braziers flanking the arena for atmosphere
+function brazier(x) {
+  const l = new THREE.PointLight(0xff8a3c, 12, 9, 2);
+  l.position.set(x, 1.9, -1.4);
+  scene.add(l);
+  const orb = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0xffb060 })
+  );
+  orb.position.copy(l.position);
+  scene.add(orb);
+  return l;
+}
+const braziers = [brazier(-3.2), brazier(3.2)];
 
 // ---------------------------------------------------------------------------
 // Floor + arena
@@ -110,26 +140,26 @@ function makeFloorTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = s;
   const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(s / 2, s / 2, 60, s / 2, s / 2, s / 1.4);
-  g.addColorStop(0, '#2a2f4a');
-  g.addColorStop(1, '#12142440'.slice(0, 7));
-  g.fillStyle = '#181c30';
+  ctx.fillStyle = '#14110c';
   ctx.fillRect(0, 0, s, s);
+  const g = ctx.createRadialGradient(s / 2, s / 2, 40, s / 2, s / 2, s / 1.5);
+  g.addColorStop(0, '#3a3220');
+  g.addColorStop(1, '#0d0b07');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, s, s);
-  // concentric arena rings
-  ctx.strokeStyle = 'rgba(92,200,255,0.20)';
+  // engraved gold rings
+  ctx.strokeStyle = 'rgba(230,180,90,0.28)';
   ctx.lineWidth = 3;
-  for (let r = 80; r < s / 2; r += 90) {
+  for (let r = 70; r < s / 2; r += 82) {
     ctx.beginPath();
     ctx.arc(s / 2, s / 2, r, 0, Math.PI * 2);
     ctx.stroke();
   }
-  // subtle radial spokes
-  ctx.strokeStyle = 'rgba(120,140,220,0.10)';
+  // runic spokes
+  ctx.strokeStyle = 'rgba(200,150,80,0.12)';
   ctx.lineWidth = 2;
-  for (let a = 0; a < 12; a++) {
-    const ang = (a / 12) * Math.PI * 2;
+  for (let a = 0; a < 16; a++) {
+    const ang = (a / 16) * Math.PI * 2;
     ctx.beginPath();
     ctx.moveTo(s / 2, s / 2);
     ctx.lineTo(s / 2 + Math.cos(ang) * s, s / 2 + Math.sin(ang) * s);
@@ -143,19 +173,19 @@ function makeFloorTexture() {
 
 const floor = new THREE.Mesh(
   new THREE.CircleGeometry(14, 64),
-  new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: 0.85, metalness: 0.1 })
+  new THREE.MeshStandardMaterial({ map: makeFloorTexture(), roughness: 0.82, metalness: 0.2 })
 );
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
 
-// glowing ring under the dummy
+// glowing ring under the dummy (tinted by combo tier)
 const ring = new THREE.Mesh(
-  new THREE.RingGeometry(0.85, 0.98, 48),
-  new THREE.MeshBasicMaterial({ color: 0x5cc8ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
+  new THREE.RingGeometry(0.85, 1.0, 48),
+  new THREE.MeshBasicMaterial({ color: 0xe6b45a, transparent: true, opacity: 0.5, side: THREE.DoubleSide })
 );
 ring.rotation.x = -Math.PI / 2;
-ring.position.y = 0.011;
+ring.position.y = 0.012;
 scene.add(ring);
 
 // ---------------------------------------------------------------------------
@@ -166,31 +196,23 @@ scene.add(sword);
 
 const bladeMat = new THREE.MeshStandardMaterial({
   color: 0xeaf2ff, metalness: 1.0, roughness: 0.16,
-  envMapIntensity: 1.4,
+  envMapIntensity: 1.5, emissive: 0x000000,
 });
-const guardMat = new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 1.0, roughness: 0.35 });
+const guardMat = new THREE.MeshStandardMaterial({ color: 0xd9a441, metalness: 1.0, roughness: 0.32 });
 const gripMat = new THREE.MeshStandardMaterial({ color: 0x3a2417, metalness: 0.1, roughness: 0.9 });
 
-// blade: main flat box + a tapered tip
-const bladeMain = new THREE.Mesh(
-  new THREE.BoxGeometry(0.05, CFG.bladeLength * 0.82, 0.012),
-  bladeMat
-);
+const bladeMain = new THREE.Mesh(new THREE.BoxGeometry(0.05, CFG.bladeLength * 0.82, 0.012), bladeMat);
 bladeMain.position.y = CFG.gripLength + CFG.bladeLength * 0.41;
 bladeMain.castShadow = true;
 sword.add(bladeMain);
 
-const bladeTip = new THREE.Mesh(
-  new THREE.ConeGeometry(0.025, CFG.bladeLength * 0.18, 4),
-  bladeMat
-);
+const bladeTip = new THREE.Mesh(new THREE.ConeGeometry(0.025, CFG.bladeLength * 0.18, 4), bladeMat);
 bladeTip.position.y = CFG.gripLength + CFG.bladeLength * 0.82 + CFG.bladeLength * 0.09;
 bladeTip.rotation.y = Math.PI / 4;
-bladeTip.scale.z = 0.28; // flatten the 4-sided tip toward the blade's profile
+bladeTip.scale.z = 0.28;
 bladeTip.castShadow = true;
 sword.add(bladeTip);
 
-// fuller (center groove) — a thin darker inlay for detail
 const fuller = new THREE.Mesh(
   new THREE.BoxGeometry(0.012, CFG.bladeLength * 0.7, 0.014),
   new THREE.MeshStandardMaterial({ color: 0xaeb9cc, metalness: 1, roughness: 0.35 })
@@ -198,45 +220,50 @@ const fuller = new THREE.Mesh(
 fuller.position.y = bladeMain.position.y;
 sword.add(fuller);
 
-const guard = new THREE.Mesh(
-  new THREE.BoxGeometry(0.19, 0.028, 0.05),
-  guardMat
-);
+const guard = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.028, 0.05), guardMat);
 guard.position.y = CFG.gripLength;
 guard.castShadow = true;
 sword.add(guard);
 
-const grip = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.017, 0.019, CFG.gripLength, 16),
-  gripMat
-);
+const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.019, CFG.gripLength, 16), gripMat);
 grip.position.y = CFG.gripLength / 2;
 sword.add(grip);
 
-const pommel = new THREE.Mesh(
-  new THREE.SphereGeometry(0.024, 16, 12),
-  guardMat
-);
+const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.024, 16, 12), guardMat);
 pommel.position.y = 0;
 pommel.castShadow = true;
 sword.add(pommel);
 
-// Rest ("mount") orientation: blade up and tilted slightly forward — a guard stance.
+// round tsuba guard (shown only for the katana skin)
+const tsuba = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.058, 0.014, 24), guardMat);
+tsuba.rotation.x = Math.PI / 2;
+tsuba.position.y = CFG.gripLength;
+tsuba.visible = false;
+tsuba.castShadow = true;
+sword.add(tsuba);
+
+// combo glow light riding the blade
+const bladeGlow = new THREE.PointLight(0x5cc8ff, 0, 3.5, 2);
+bladeGlow.position.y = CFG.gripLength + CFG.bladeLength * 0.7;
+sword.add(bladeGlow);
+
+// persistent effect light for fire / ice blades (independent of combo glow)
+const fxLight = new THREE.PointLight(0xff5a20, 0, 2.8, 2);
+fxLight.position.y = CFG.gripLength + CFG.bladeLength * 0.55;
+sword.add(fxLight);
+
 const mountQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.42, 0, 0, 'XYZ'));
 
-// blade local endpoints (guard base and tip) for collision + trail
 const BLADE_BASE_LOCAL = new THREE.Vector3(0, CFG.gripLength, 0);
 const BLADE_TIP_LOCAL = new THREE.Vector3(0, CFG.gripLength + CFG.bladeLength, 0);
-// inner point for a thin tip-trail ribbon (upper third of the blade)
 const BLADE_TRAIL_LOCAL = new THREE.Vector3(0, CFG.gripLength + CFG.bladeLength * 0.62, 0);
 
 // ---------------------------------------------------------------------------
-// Training dummy (humanoid pell on a springy base)
+// Training dummy (humanoid pell on a springy base) + selectable skins
 // ---------------------------------------------------------------------------
 const dummyRoot = new THREE.Group();
 scene.add(dummyRoot);
 
-// static weighted base (does not tilt)
 const baseMat = new THREE.MeshStandardMaterial({ color: 0x20242f, metalness: 0.4, roughness: 0.6 });
 const base = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.14, 32), baseMat);
 base.position.y = 0.07;
@@ -247,16 +274,50 @@ post.position.y = 0.24;
 post.castShadow = true;
 dummyRoot.add(post);
 
-// the part that reacts (tilts about ~y=0.35)
 const PIVOT_Y = 0.35;
 const body = new THREE.Group();
 body.position.set(0, PIVOT_Y, 0);
 dummyRoot.add(body);
 
+// "main" and "dark" body materials — mutated by applySkin()
 const woodMat = new THREE.MeshStandardMaterial({ color: 0xb0763f, metalness: 0.05, roughness: 0.7 });
 const woodDark = new THREE.MeshStandardMaterial({ color: 0x7d5228, metalness: 0.05, roughness: 0.75 });
+const faceMat = new THREE.MeshStandardMaterial({ color: 0x201007, roughness: 0.8 });
 
-// Helper to add a mesh to body with local offset (relative to pivot).
+const SKINS = {
+  oak: {
+    label: 'Oak', swatch: '#b0763f',
+    main: { color: 0xb0763f, metalness: 0.05, roughness: 0.7, emissive: 0x000000 },
+    dark: { color: 0x7d5228, metalness: 0.05, roughness: 0.75, emissive: 0x000000 },
+    base: { color: 0x20242f, metalness: 0.4, roughness: 0.6 },
+    ring: 0xe6b45a,
+  },
+  iron: {
+    label: 'Iron', swatch: '#9aa3ad',
+    main: { color: 0x9aa3ad, metalness: 0.85, roughness: 0.38, emissive: 0x000000 },
+    dark: { color: 0x5b636d, metalness: 0.9, roughness: 0.42, emissive: 0x000000 },
+    base: { color: 0x15181f, metalness: 0.6, roughness: 0.5 },
+    ring: 0x8fd0ff,
+  },
+  gold: {
+    label: 'Gold', swatch: '#e9b74a',
+    main: { color: 0xe9b74a, metalness: 1.0, roughness: 0.26, emissive: 0x1a0e00 },
+    dark: { color: 0xb07d1f, metalness: 1.0, roughness: 0.32, emissive: 0x120800 },
+    base: { color: 0x1c140a, metalness: 0.7, roughness: 0.45 },
+    ring: 0xffd166,
+  },
+};
+let currentSkin = 'oak';
+function applySkin(id) {
+  const sk = SKINS[id] || SKINS.oak;
+  currentSkin = id;
+  woodMat.color.setHex(sk.main.color); woodMat.metalness = sk.main.metalness; woodMat.roughness = sk.main.roughness; woodMat.emissive.setHex(sk.main.emissive);
+  woodDark.color.setHex(sk.dark.color); woodDark.metalness = sk.dark.metalness; woodDark.roughness = sk.dark.roughness; woodDark.emissive.setHex(sk.dark.emissive);
+  baseMat.color.setHex(sk.base.color); baseMat.metalness = sk.base.metalness; baseMat.roughness = sk.base.roughness;
+  ringBaseColor = sk.ring;
+}
+let ringBaseColor = 0xe6b45a;
+
 function addPart(mesh, x, y, z) {
   mesh.position.set(x, y - PIVOT_Y, z);
   mesh.castShadow = true;
@@ -264,67 +325,144 @@ function addPart(mesh, x, y, z) {
   return mesh;
 }
 
-// torso, head, arms — each also registered as a collision capsule
 const parts = [];
-function registerCapsule(mesh, a, b, radius, name, scoreMul = 1) {
-  parts.push({ mesh, a: a.clone(), b: b.clone(), radius, name, scoreMul, flash: 0, cd: 0 });
+function registerCapsule(mesh, a, b, radius, name, scoreMul = 1, front = new THREE.Vector3(0, 0, 0.24)) {
+  parts.push({ mesh, a: a.clone(), b: b.clone(), radius, name, scoreMul, front: front.clone(), cd: 0 });
 }
 
 const torso = addPart(new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.62, 8, 20), woodMat), 0, 1.12, 0);
-registerCapsule(torso, new THREE.Vector3(0, -0.31, 0), new THREE.Vector3(0, 0.31, 0), 0.28, 'torso', 1);
+registerCapsule(torso, new THREE.Vector3(0, -0.31, 0), new THREE.Vector3(0, 0.31, 0), 0.28, 'chest', 1.5, new THREE.Vector3(0, 0.05, 0.27));
 
 const hips = addPart(new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.18, 8, 18), woodDark), 0, 0.72, 0);
-registerCapsule(hips, new THREE.Vector3(0, -0.09, 0), new THREE.Vector3(0, 0.09, 0), 0.24, 'body', 1);
+registerCapsule(hips, new THREE.Vector3(0, -0.09, 0), new THREE.Vector3(0, 0.09, 0), 0.24, 'stomach', 1.2, new THREE.Vector3(0, 0, 0.24));
 
 const neck = addPart(new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.1, 16), woodDark), 0, 1.5, 0);
 const head = addPart(new THREE.Mesh(new THREE.SphereGeometry(0.17, 24, 18), woodMat), 0, 1.66, 0);
-registerCapsule(head, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.02, 0), 0.18, 'head', 2);
+registerCapsule(head, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.02, 0), 0.18, 'head', 2.0, new THREE.Vector3(0, 0, 0.17));
 
-// simple carved face marks
-const faceMat = new THREE.MeshStandardMaterial({ color: 0x2a1c10, roughness: 0.8 });
 const eyeL = addPart(new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), faceMat), -0.06, 1.70, 0.15);
 const eyeR = addPart(new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), faceMat), 0.06, 1.70, 0.15);
 
-// arms as angled pegs (wing-chun-ish)
+const bodyCapsules = [];
+function registerCapsuleBody(mesh, a, b, radius, name, scoreMul, front) {
+  bodyCapsules.push({ mesh, a: a.clone(), b: b.clone(), radius, name, scoreMul, front: front.clone(), cd: 0 });
+}
 function makeArm(side) {
   const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.5, 6, 14), woodDark);
   const shoulderX = 0.30 * side;
   arm.rotation.z = 0.5 * side;
   arm.rotation.x = -0.35;
   addPart(arm, shoulderX, 1.28, 0.08);
-  // capsule endpoints in body-local space (approx along the arm)
   const len = 0.32;
   const dir = new THREE.Vector3(Math.sin(0.5 * side), -Math.cos(0.5 * side), 0.34).normalize();
   const shoulderLocal = new THREE.Vector3(shoulderX, 1.28 - PIVOT_Y, 0.08);
   const a = shoulderLocal.clone().addScaledVector(dir, -len);
   const b = shoulderLocal.clone().addScaledVector(dir, len);
-  // register on the arm mesh but express endpoints relative to the arm mesh's own frame:
-  // simpler: register against body via a proxy object whose matrixWorld == body's.
-  registerCapsuleBody(a, b, 0.09, side < 0 ? 'armL' : 'armR', 1);
+  registerCapsuleBody(body, a, b, 0.09, side < 0 ? 'arm' : 'arm', 1.1,
+    shoulderLocal.clone().add(new THREE.Vector3(0.05 * side, -0.05, 0.12)));
   return arm;
-}
-// capsules expressed directly in body-local coords (transformed by body.matrixWorld)
-const bodyCapsules = [];
-function registerCapsuleBody(a, b, radius, name, scoreMul) {
-  bodyCapsules.push({ a: a.clone(), b: b.clone(), radius, name, scoreMul, cd: 0 });
 }
 makeArm(-1);
 makeArm(1);
 
-// Dummy reaction state (damped spring, tilts about X and Z; small twist about Y)
-const dummy = {
-  leanX: 0, leanZ: 0, twist: 0,
-  velX: 0, velZ: 0, velT: 0,
-  hitPulse: 0,
-};
+applySkin('oak');
+
+const dummy = { leanX: 0, leanZ: 0, twist: 0, velX: 0, velZ: 0, velT: 0, hitPulse: 0 };
 
 // ---------------------------------------------------------------------------
-// Blade trail (fading ribbon)
+// Lit target marker (Target Rush mode) — a glowing weak-point on the dummy
+// ---------------------------------------------------------------------------
+function makeTargetMarker() {
+  // Kept small so it marks the weak-point without obscuring the dummy.
+  const g = new THREE.Group();
+  const ringGeo = new THREE.RingGeometry(0.058, 0.08, 32);
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xff4d6d, transparent: true, opacity: 0.95, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthTest: false });
+  const rings = new THREE.Mesh(ringGeo, ringMat);
+  g.add(rings);
+  const core = new THREE.Mesh(
+    new THREE.CircleGeometry(0.032, 20),
+    new THREE.MeshBasicMaterial({ color: 0xffe0a0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthTest: false })
+  );
+  g.add(core);
+  // crosshair ticks
+  const tickMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthTest: false });
+  for (let i = 0; i < 4; i++) {
+    const t = new THREE.Mesh(new THREE.PlaneGeometry(0.012, 0.032), tickMat);
+    t.position.set(Math.cos(i * Math.PI / 2) * 0.098, Math.sin(i * Math.PI / 2) * 0.098, 0);
+    t.rotation.z = i * Math.PI / 2;
+    g.add(t);
+  }
+  // countdown ring (scales down over target lifetime)
+  const timerGeo = new THREE.RingGeometry(0.088, 0.104, 32);
+  const timerMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthTest: false });
+  const timer = new THREE.Mesh(timerGeo, timerMat);
+  g.add(timer);
+  g.renderOrder = 999;
+  g.visible = false;
+  g.userData = { rings, core, timer, ringMat, coreMat: core.material, timerMat };
+  return g;
+}
+const targetMarker = makeTargetMarker();
+scene.add(targetMarker);
+
+const rush = {
+  active: false,
+  cap: null,          // capsule meta being targeted
+  worldPos: new THREE.Vector3(),
+  radius: 0.17,       // hit tolerance (a bit larger than the marker — phone aim)
+  mult: 1,
+  time: 0,            // remaining seconds
+  maxTime: 3.2,
+  pulse: 0,
+};
+
+const RUSH_TARGETS = () => [...parts, ...bodyCapsules].filter(
+  (c) => ['head', 'chest', 'stomach', 'arm'].includes(c.name)
+);
+
+function targetWorldPos(cap, out) {
+  cap.mesh.updateMatrixWorld(true);
+  out.copy(cap.front).applyMatrix4(cap.mesh.matrixWorld);
+  return out;
+}
+
+function spawnRushTarget() {
+  const pool = RUSH_TARGETS();
+  let pick = pool[Math.floor(Math.random() * pool.length)];
+  // avoid repeating the exact same spot twice in a row
+  if (rush.cap && pool.length > 1) {
+    let guard = 0;
+    while (pick === rush.cap && guard++ < 5) pick = pool[Math.floor(Math.random() * pool.length)];
+  }
+  rush.cap = pick;
+  rush.mult = pick.scoreMul;
+  rush.maxTime = Math.max(1.5, 3.4 - game.combo * 0.05);
+  rush.time = rush.maxTime;
+  rush.active = true;
+  targetMarker.visible = true;
+  const tint = pick.name === 'head' ? 0xff4d6d : pick.name === 'chest' ? 0xffa24d : 0x5ce08a;
+  targetMarker.userData.ringMat.color.setHex(tint);
+  // Position it immediately (collision runs before updateRush in the loop).
+  body.updateMatrixWorld(true);
+  targetWorldPos(pick, rush.worldPos);
+  targetMarker.position.copy(rush.worldPos);
+  updateTargetCard();
+}
+
+function clearRushTarget() {
+  rush.active = false;
+  rush.cap = null;
+  targetMarker.visible = false;
+}
+
+// ---------------------------------------------------------------------------
+// Blade trail
 // ---------------------------------------------------------------------------
 class Trail {
   constructor(maxSamples = 16) {
     this.max = maxSamples;
-    this.samples = []; // {tip:Vector3, base:Vector3}
+    this.samples = [];
+    this.color = new THREE.Color(0x9fd8ff);
     const geo = new THREE.BufferGeometry();
     this.positions = new Float32Array(maxSamples * 2 * 3);
     this.colors = new Float32Array(maxSamples * 2 * 3);
@@ -338,7 +476,7 @@ class Trail {
     geo.setIndex(idx);
     this.geo = geo;
     this.mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.4,
+      vertexColors: true, transparent: true, opacity: 0.5,
       side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
     }));
     this.mesh.frustumCulled = false;
@@ -351,22 +489,18 @@ class Trail {
   }
   _rebuild() {
     const n = this.samples.length;
+    const cr = this.color.r, cg = this.color.g, cb = this.color.b;
     for (let i = 0; i < this.max; i++) {
       const s = this.samples[Math.min(i, n - 1)] || this.samples[0];
       const o = i * 6;
       if (!s) { this.positions[o + 1] = -100; this.positions[o + 4] = -100; continue; }
       this.positions[o] = s.base.x; this.positions[o + 1] = s.base.y; this.positions[o + 2] = s.base.z;
       this.positions[o + 3] = s.tip.x; this.positions[o + 4] = s.tip.y; this.positions[o + 5] = s.tip.z;
-      const age = i / this.max;                 // 0 oldest .. 1 newest
+      const age = i / this.max;
       const a = Math.pow(age, 2.0) * (s.i || 0);
-      // cyan core fading to soft blue at the trailing edge
       const co = i * 6;
-      this.colors[co] = 0.18 * a;
-      this.colors[co + 1] = 0.55 * a;
-      this.colors[co + 2] = 0.9 * a;
-      this.colors[co + 3] = 0.5 * a;
-      this.colors[co + 4] = 0.85 * a;
-      this.colors[co + 5] = 1.0 * a;
+      this.colors[co] = cr * a * 0.7; this.colors[co + 1] = cg * a * 0.85; this.colors[co + 2] = cb * a;
+      this.colors[co + 3] = cr * a; this.colors[co + 4] = cg * a; this.colors[co + 5] = cb * a;
     }
     this.geo.attributes.position.needsUpdate = true;
     this.geo.attributes.color.needsUpdate = true;
@@ -375,45 +509,49 @@ class Trail {
 const trail = new Trail();
 
 // ---------------------------------------------------------------------------
-// Hit particles (pooled)
+// Hit particles
 // ---------------------------------------------------------------------------
-const MAX_P = 240;
+const MAX_P = 340;
 const pPos = new Float32Array(MAX_P * 3);
+const pCol = new Float32Array(MAX_P * 3);
 const pGeo = new THREE.BufferGeometry();
 pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
 const sparkTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const x = c.getContext('2d');
   const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.3, 'rgba(255,224,150,0.9)');
-  g.addColorStop(1, 'rgba(255,120,60,0)');
+  g.addColorStop(0.35, 'rgba(255,255,255,0.85)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
   x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-  const t = new THREE.CanvasTexture(c); return t;
+  return new THREE.CanvasTexture(c);
 })();
 const pMat = new THREE.PointsMaterial({
-  size: 0.14, map: sparkTex, transparent: true, blending: THREE.AdditiveBlending,
-  depthWrite: false, sizeAttenuation: true,
+  size: 0.15, map: sparkTex, transparent: true, blending: THREE.AdditiveBlending,
+  depthWrite: false, sizeAttenuation: true, vertexColors: true,
 });
 const points = new THREE.Points(pGeo, pMat);
 points.frustumCulled = false;
 scene.add(points);
-const sparks = []; // {pos, vel, life, max}
+const sparks = [];
+const _sparkCol = new THREE.Color();
 for (let i = 0; i < MAX_P; i++) pPos[i * 3 + 1] = -1000;
 
-function burst(pos, dir, power) {
-  const count = Math.min(28, 10 + Math.floor(power * 0.2));
+const WARM = 0xffcf7a;
+function burst(pos, dir, power, color = WARM, spread = 3.4) {
+  const count = Math.min(40, 12 + Math.floor(power * 0.3));
+  _sparkCol.setHex(color);
   for (let i = 0; i < count; i++) {
     if (sparks.length >= MAX_P) break;
-    const v = dir.clone().multiplyScalar(1.5 + Math.random() * 2.5 * (power / 60));
-    v.x += (Math.random() - 0.5) * 3;
-    v.y += (Math.random() - 0.5) * 3 + 1.2;
-    v.z += (Math.random() - 0.5) * 3;
-    sparks.push({ pos: pos.clone(), vel: v, life: 0, max: 0.35 + Math.random() * 0.3 });
+    const v = dir.clone().multiplyScalar(1.5 + Math.random() * 3.0 * (power / 60));
+    v.x += (Math.random() - 0.5) * spread;
+    v.y += (Math.random() - 0.5) * spread + 1.4;
+    v.z += (Math.random() - 0.5) * spread;
+    sparks.push({ pos: pos.clone(), vel: v, life: 0, max: 0.35 + Math.random() * 0.35, r: _sparkCol.r, g: _sparkCol.g, b: _sparkCol.b });
   }
 }
 function updateSparks(dt) {
-  let w = 0;
   for (let i = sparks.length - 1; i >= 0; i--) {
     const s = sparks[i];
     s.life += dt;
@@ -423,21 +561,201 @@ function updateSparks(dt) {
   }
   for (let i = 0; i < MAX_P; i++) {
     if (i < sparks.length) {
-      const p = sparks[i].pos;
-      pPos[i * 3] = p.x; pPos[i * 3 + 1] = p.y; pPos[i * 3 + 2] = p.z;
-    } else {
-      pPos[i * 3 + 1] = -1000;
-    }
+      const s = sparks[i];
+      const k = 1 - s.life / s.max;
+      pPos[i * 3] = s.pos.x; pPos[i * 3 + 1] = s.pos.y; pPos[i * 3 + 2] = s.pos.z;
+      pCol[i * 3] = s.r * k; pCol[i * 3 + 1] = s.g * k; pCol[i * 3 + 2] = s.b * k;
+    } else pPos[i * 3 + 1] = -1000;
   }
   pGeo.attributes.position.needsUpdate = true;
+  pGeo.attributes.color.needsUpdate = true;
 }
 
-// impact flash light
+// ---------------------------------------------------------------------------
+// Fire embers (continuous drift from a fire blade) + ice shards (on ice hit)
+// ---------------------------------------------------------------------------
+const MAX_E = 140;
+const ePos = new Float32Array(MAX_E * 3);
+const eCol = new Float32Array(MAX_E * 3);
+const eGeo = new THREE.BufferGeometry();
+eGeo.setAttribute('position', new THREE.BufferAttribute(ePos, 3));
+eGeo.setAttribute('color', new THREE.BufferAttribute(eCol, 3));
+const emberMat = new THREE.PointsMaterial({ size: 0.1, map: sparkTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true, vertexColors: true });
+const emberPoints = new THREE.Points(eGeo, emberMat);
+emberPoints.frustumCulled = false;
+scene.add(emberPoints);
+const embers = [];
+for (let i = 0; i < MAX_E; i++) ePos[i * 3 + 1] = -1000;
+const _emberAt = new THREE.Vector3();
+function emitEmber(worldPoint) {
+  if (embers.length >= MAX_E) return;
+  const hot = Math.random();
+  embers.push({
+    pos: worldPoint.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.05, (Math.random() - 0.5) * 0.05, (Math.random() - 0.5) * 0.05)),
+    vel: new THREE.Vector3((Math.random() - 0.5) * 0.4, 0.5 + Math.random() * 0.8, (Math.random() - 0.5) * 0.4),
+    life: 0, max: 0.5 + Math.random() * 0.5,
+    r: 1.0, g: 0.45 + hot * 0.3, b: 0.1 * hot,
+  });
+}
+function updateEmbers(dt) {
+  for (let i = embers.length - 1; i >= 0; i--) {
+    const e = embers[i];
+    e.life += dt;
+    if (e.life >= e.max) { embers.splice(i, 1); continue; }
+    e.vel.y += 1.2 * dt; // embers accelerate upward slightly
+    e.pos.addScaledVector(e.vel, dt);
+  }
+  for (let i = 0; i < MAX_E; i++) {
+    if (i < embers.length) {
+      const e = embers[i];
+      const k = 1 - e.life / e.max;
+      ePos[i * 3] = e.pos.x; ePos[i * 3 + 1] = e.pos.y; ePos[i * 3 + 2] = e.pos.z;
+      eCol[i * 3] = e.r * k; eCol[i * 3 + 1] = e.g * k; eCol[i * 3 + 2] = e.b * k;
+    } else ePos[i * 3 + 1] = -1000;
+  }
+  eGeo.attributes.position.needsUpdate = true;
+  eGeo.attributes.color.needsUpdate = true;
+}
+
+// Ice shards — pooled small crystals that burst and fall on an ice-blade hit.
+const iceShards = [];
+const shardGeo = new THREE.OctahedronGeometry(0.05, 0);
+const shardMat = new THREE.MeshStandardMaterial({ color: 0xcdeeff, emissive: 0x2a80b0, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.9, flatShading: true });
+for (let i = 0; i < 26; i++) {
+  const m = new THREE.Mesh(shardGeo, shardMat.clone());
+  m.visible = false;
+  scene.add(m);
+  iceShards.push({ mesh: m, vel: new THREE.Vector3(), spin: new THREE.Vector3(), life: 0, max: 0, active: false });
+}
+function spawnIceShards(worldPoint, dir, power) {
+  let spawned = 0;
+  for (const sh of iceShards) {
+    if (sh.active) continue;
+    sh.active = true;
+    sh.life = 0; sh.max = 0.5 + Math.random() * 0.4;
+    sh.mesh.visible = true;
+    sh.mesh.position.copy(worldPoint);
+    const s = 0.6 + Math.random() * 0.9;
+    sh.mesh.scale.setScalar(s);
+    const v = dir.clone().multiplyScalar(1.5 + Math.random() * 2.5 * (power / 60));
+    v.x += (Math.random() - 0.5) * 3; v.y += Math.random() * 2.4 + 0.6; v.z += (Math.random() - 0.5) * 3;
+    sh.vel.copy(v);
+    sh.spin.set((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12);
+    sh.baseScale = s;
+    if (++spawned >= 10) break;
+  }
+}
+function updateIceShards(dt) {
+  for (const sh of iceShards) {
+    if (!sh.active) continue;
+    sh.life += dt;
+    if (sh.life >= sh.max) { sh.active = false; sh.mesh.visible = false; continue; }
+    sh.vel.y -= 9.8 * dt;
+    sh.mesh.position.addScaledVector(sh.vel, dt);
+    sh.mesh.rotation.x += sh.spin.x * dt;
+    sh.mesh.rotation.y += sh.spin.y * dt;
+    const k = 1 - sh.life / sh.max;
+    sh.mesh.material.opacity = 0.9 * k;
+    sh.mesh.scale.setScalar(sh.baseScale * (0.5 + 0.5 * k));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sword skins — Classic, Katana, Fire, Ice
+// ---------------------------------------------------------------------------
+const SWORD_SKINS = {
+  classic: {
+    label: 'Classic', swatch: 'linear-gradient(180deg,#f2f6ff,#9fb0c8)',
+    blade: { color: 0xeaf2ff, metalness: 1.0, roughness: 0.16, emissive: 0x000000, ei: 0 },
+    guard: 'cross', guardColor: 0xd9a441, gripColor: 0x3a2417, width: 1.0,
+    trail: 0x9fd8ff, effect: null, fx: { color: 0x000000, intensity: 0 }, spark: WARM,
+  },
+  katana: {
+    label: 'Katana', swatch: 'linear-gradient(180deg,#e7edf5,#8b97a8)',
+    blade: { color: 0xdfe8f2, metalness: 1.0, roughness: 0.1, emissive: 0x000000, ei: 0 },
+    guard: 'tsuba', guardColor: 0x191919, gripColor: 0x5a1420, width: 0.68,
+    trail: 0xffe0b0, effect: null, fx: { color: 0x000000, intensity: 0 }, spark: 0xfff0d0,
+  },
+  fire: {
+    label: 'Fire', swatch: 'linear-gradient(180deg,#ffd08a,#ff4d10)',
+    blade: { color: 0xffb45c, metalness: 0.5, roughness: 0.32, emissive: 0xff4a10, ei: 1.2 },
+    guard: 'cross', guardColor: 0x6a2a10, gripColor: 0x2a1206, width: 1.0,
+    trail: 0xff7a2c, effect: 'fire', fx: { color: 0xff5a20, intensity: 2.8 }, spark: 0xff6a1e,
+  },
+  ice: {
+    label: 'Ice', swatch: 'linear-gradient(180deg,#eafaff,#4aa8d8)',
+    blade: { color: 0xbfeaff, metalness: 0.55, roughness: 0.08, emissive: 0x1f88c0, ei: 0.85 },
+    guard: 'cross', guardColor: 0x2a5a70, gripColor: 0x123040, width: 1.0,
+    trail: 0x9fe8ff, effect: 'ice', fx: { color: 0x5cc8ff, intensity: 2.2 }, spark: 0x9fe8ff,
+  },
+};
+let swordEffect = null;
+let swordTrailColor = 0x9fd8ff;
+let swordSparkColor = WARM;
+let currentSword = 'classic';
+
+function setSwordSkin(id) {
+  const sk = SWORD_SKINS[id] || SWORD_SKINS.classic;
+  currentSword = id;
+  bladeMat.color.setHex(sk.blade.color);
+  bladeMat.metalness = sk.blade.metalness;
+  bladeMat.roughness = sk.blade.roughness;
+  bladeMat.emissive.setHex(sk.blade.emissive);
+  bladeMat.emissiveIntensity = sk.blade.ei;
+  fuller.material.color.setHex(sk.blade.color);
+  fuller.material.emissive.setHex(sk.blade.emissive);
+  fuller.material.emissiveIntensity = sk.blade.ei * 0.6;
+  guardMat.color.setHex(sk.guardColor);
+  gripMat.color.setHex(sk.gripColor);
+  const katana = sk.guard === 'tsuba';
+  guard.visible = !katana;
+  pommel.visible = !katana;
+  tsuba.visible = katana;
+  bladeMain.scale.x = sk.width;
+  fuller.scale.x = sk.width;
+  bladeTip.scale.x = sk.width;
+  fxLight.color.setHex(sk.fx.color);
+  fxLight.intensity = sk.fx.intensity;
+  swordEffect = sk.effect;
+  swordTrailColor = sk.trail;
+  swordSparkColor = sk.spark;
+  if (game.combo < 2) trail.color.setHex(swordTrailColor);
+}
+
+function swordHitFX(worldPoint, dir, power) {
+  if (swordEffect === 'fire') {
+    for (let i = 0; i < 12; i++) emitEmber(worldPoint);
+    impactLight.color.setHex(0xff6a20);
+  } else if (swordEffect === 'ice') {
+    spawnIceShards(worldPoint, dir, power);
+    impactLight.color.setHex(0x8fd6ff);
+  }
+}
+
 const impactLight = new THREE.PointLight(0xffd9a0, 0, 6, 2);
 scene.add(impactLight);
 
 // ---------------------------------------------------------------------------
-// Audio (procedural — no assets)
+// Floating damage numbers (DOM, projected from 3D)
+// ---------------------------------------------------------------------------
+const _proj = new THREE.Vector3();
+function spawnDamageNumber(worldPoint, text, cls) {
+  if (!dmgLayer) return;
+  _proj.copy(worldPoint).project(camera);
+  if (_proj.z > 1) return;
+  const x = (_proj.x * 0.5 + 0.5) * window.innerWidth;
+  const y = (-_proj.y * 0.5 + 0.5) * window.innerHeight;
+  const el = document.createElement('div');
+  el.className = 'dmg ' + (cls || '');
+  el.textContent = text;
+  el.style.left = x + 'px';
+  el.style.top = y + 'px';
+  dmgLayer.appendChild(el);
+  el.addEventListener('animationend', () => el.remove());
+}
+
+// ---------------------------------------------------------------------------
+// Audio
 // ---------------------------------------------------------------------------
 let audioCtx = null;
 function initAudio() {
@@ -459,22 +777,29 @@ function playHit(power, metal) {
   gain.gain.setValueAtTime(vol, t);
   gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
   gain.connect(audioCtx.destination);
-  // thud body
   const osc = audioCtx.createOscillator();
   osc.type = 'sine';
-  osc.frequency.setValueAtTime(metal ? 520 : 160, t);
-  osc.frequency.exponentialRampToValueAtTime(metal ? 180 : 70, t + 0.25);
+  osc.frequency.setValueAtTime(metal ? 620 : 160, t);
+  osc.frequency.exponentialRampToValueAtTime(metal ? 200 : 70, t + 0.25);
   osc.connect(gain); osc.start(t); osc.stop(t + 0.32);
-  // noise transient
   const src = audioCtx.createBufferSource();
   src.buffer = noiseBuffer(0.18);
   const bp = audioCtx.createBiquadFilter();
-  bp.type = 'bandpass'; bp.frequency.value = metal ? 3200 : 900; bp.Q.value = 0.8;
+  bp.type = 'bandpass'; bp.frequency.value = metal ? 3400 : 900; bp.Q.value = 0.8;
   const ng = audioCtx.createGain();
   ng.gain.setValueAtTime(vol * 0.8, t);
   ng.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
   src.connect(bp); bp.connect(ng); ng.connect(audioCtx.destination);
   src.start(t); src.stop(t + 0.18);
+}
+function playChime(freq, dur = 0.25) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const o = audioCtx.createOscillator(); o.type = 'triangle'; o.frequency.value = freq;
+  const g = audioCtx.createGain(); g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t + dur);
 }
 let whooshGain = null, whooshFilter = null;
 function ensureWhoosh() {
@@ -495,10 +820,10 @@ function setWhoosh(speed) {
 }
 
 // ---------------------------------------------------------------------------
-// Input: orientation quaternion from IMU, or mouse
+// Input
 // ---------------------------------------------------------------------------
 const zee = new THREE.Vector3(0, 0, 1);
-const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -90° about X
+const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
 const eulerTmp = new THREE.Euler();
 function deviceQuaternion(alpha, beta, gamma, orient, out) {
   eulerTmp.set(beta, alpha, -gamma, 'YXZ');
@@ -509,19 +834,23 @@ function deviceQuaternion(alpha, beta, gamma, orient, out) {
 }
 
 const input = {
-  mode: LOCAL_MODE ? 'sensor' : 'idle', // 'sensor' | 'mouse' | 'idle'
+  mode: LOCAL_MODE ? 'sensor' : 'idle',
   rawQ: new THREE.Quaternion(),
-  refInv: new THREE.Quaternion(),       // calibration reference (inverse)
+  refInv: new THREE.Quaternion(),
   hasCalib: false,
-  // mouse target angles
   mYaw: 0, mPitch: 0, mYawT: 0, mPitchT: 0,
 };
 
 function calibrate() {
   input.refInv.copy(input.rawQ).invert();
   input.hasCalib = true;
-  hintPill.innerHTML = 'Calibrated · <b>swing!</b>';
-  setTimeout(() => { hintPill.innerHTML = 'Swing to strike · aim for the <b>head</b> for 2×'; }, 1600);
+  setHint('Calibrated · <b>swing!</b>');
+  setTimeout(() => setHint(defaultHint()), 1600);
+}
+function defaultHint() {
+  return game.mode === 'rush'
+    ? 'Strike the <b>glowing point</b> before it fades · chain them!'
+    : 'Swing to strike · aim for the <b>head</b> for 2×';
 }
 
 function applyIMU(msg) {
@@ -530,7 +859,6 @@ function applyIMU(msg) {
   if (!input.hasCalib) { input.refInv.copy(input.rawQ).invert(); input.hasCalib = true; }
 }
 
-// mouse control for testing
 function setupMouse() {
   input.mode = 'mouse';
   input.hasCalib = true;
@@ -543,46 +871,33 @@ function setupMouse() {
   window.addEventListener('pointerdown', () => { input.mThrust = 0.35; });
 }
 
-// Local-device sensors (solo mode: this page reads its own IMU)
 function setupLocalSensors() {
   const onO = (e) => {
     if (e.alpha == null && e.beta == null && e.gamma == null) return;
     const orient = ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * Math.PI / 180;
-    deviceQuaternion(
-      (e.alpha || 0) * Math.PI / 180,
-      (e.beta || 0) * Math.PI / 180,
-      (e.gamma || 0) * Math.PI / 180,
-      orient, input.rawQ
-    );
+    deviceQuaternion((e.alpha || 0) * Math.PI / 180, (e.beta || 0) * Math.PI / 180, (e.gamma || 0) * Math.PI / 180, orient, input.rawQ);
     input.mode = 'sensor';
     if (!input.hasCalib) { input.refInv.copy(input.rawQ).invert(); input.hasCalib = true; }
   };
   window.addEventListener('deviceorientation', onO, true);
-  // tap to calibrate in solo mode
   window.addEventListener('pointerdown', () => calibrate());
 }
 
 async function requestLocalMotionPermission() {
-  const needsO = typeof DeviceOrientationEvent !== 'undefined' &&
-    typeof DeviceOrientationEvent.requestPermission === 'function';
+  const needsO = typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function';
   if (needsO) {
-    try {
-      const r = await DeviceOrientationEvent.requestPermission();
-      return r === 'granted';
-    } catch { return false; }
+    try { return (await DeviceOrientationEvent.requestPermission()) === 'granted'; } catch { return false; }
   }
   return true;
 }
 
 // ---------------------------------------------------------------------------
-// Collision: closest distance between two segments
+// Collision
 // ---------------------------------------------------------------------------
 const _d1 = new THREE.Vector3(), _d2 = new THREE.Vector3(), _r = new THREE.Vector3();
 const _c1 = new THREE.Vector3(), _c2 = new THREE.Vector3();
 function segSegClosest(p1, q1v, p2, q2v, outC1, outC2) {
-  _d1.subVectors(q1v, p1);
-  _d2.subVectors(q2v, p2);
-  _r.subVectors(p1, p2);
+  _d1.subVectors(q1v, p1); _d2.subVectors(q2v, p2); _r.subVectors(p1, p2);
   const a = _d1.dot(_d1), e = _d2.dot(_d2), f = _d2.dot(_r);
   let s, t;
   const EPS = 1e-8;
@@ -606,46 +921,163 @@ function segSegClosest(p1, q1v, p2, q2v, outC1, outC2) {
 }
 
 // ---------------------------------------------------------------------------
-// Game state / HUD
+// Scoring / combos
 // ---------------------------------------------------------------------------
-const game = { hits: 0, combo: 0, bestCombo: 0, lastHitTime: -999, running: false };
-function registerHit(part, power, worldPoint, dir, metal) {
-  game.hits++;
+const game = {
+  mode: 'free', score: 0, hits: 0, combo: 0, bestCombo: 0,
+  lastHitTime: -999, running: false, lastTier: -1,
+};
+
+const TIERS = [
+  { min: 0, name: 'GOOD', color: '#7fd4ff' },
+  { min: 5, name: 'GREAT', color: '#5ce08a' },
+  { min: 15, name: 'AMAZING', color: '#ffd166' },
+  { min: 30, name: 'MASTER', color: '#ff9f45' },
+  { min: 50, name: 'LEGENDARY', color: '#ff4d6d' },
+];
+function tierIndex(n) {
+  let idx = 0;
+  for (let i = 0; i < TIERS.length; i++) if (n >= TIERS[i].min) idx = i;
+  return idx;
+}
+const PART_LABEL = { head: 'HEAD', chest: 'CHEST', stomach: 'STOMACH', arm: 'ARM', body: 'BODY' };
+
+function updateComboUI() {
+  const n = game.combo;
+  if (n >= 2) {
+    comboWrap.classList.add('show');
+    comboN.textContent = n;
+    const ti = tierIndex(n);
+    const tier = TIERS[ti];
+    comboTierEl.textContent = tier.name;
+    comboN.style.color = tier.color;
+    comboTierEl.style.color = tier.color;
+    comboMeterFill.style.height = Math.min(100, (n / 50) * 100) + '%';
+    comboMeterFill.style.background = tier.color;
+    // blade + ring glow follow the tier
+    const c = new THREE.Color(tier.color);
+    bladeGlow.color.copy(c);
+    bladeGlow.intensity = Math.min(5, 0.4 + n * 0.12);
+    bladeMat.emissive.copy(c).multiplyScalar(Math.min(0.5, n * 0.012));
+    trail.color.copy(c);
+    ring.material.color.copy(c);
+    // tier-up announcement
+    if (ti !== game.lastTier && ti > 0) {
+      announce(tier.name + '!', tier.color);
+      playChime(440 + ti * 120, 0.3);
+    }
+    game.lastTier = ti;
+  } else {
+    comboWrap.classList.remove('show');
+    bladeGlow.intensity = 0;
+    // restore the sword skin's own blade emissive (fire/ice glow)
+    const sk = SWORD_SKINS[currentSword] || SWORD_SKINS.classic;
+    bladeMat.emissive.setHex(sk.blade.emissive);
+    bladeMat.emissiveIntensity = sk.blade.ei;
+    trail.color.setHex(swordTrailColor);
+    ring.material.color.setHex(ringBaseColor);
+    game.lastTier = -1;
+  }
+}
+
+function announce(text, color) {
+  if (!popText) return;
+  popText.textContent = text;
+  popText.style.color = color || '#ffd166';
+  popText.classList.remove('pop');
+  void popText.offsetWidth; // restart animation
+  popText.classList.add('pop');
+}
+
+function updateTargetCard() {
+  if (game.mode === 'rush') {
+    targetCard.classList.add('rush');
+    if (rush.cap) {
+      targetPartEl.textContent = PART_LABEL[rush.cap.name] || rush.cap.name.toUpperCase();
+      targetMultEl.textContent = '×' + rush.mult;
+    }
+  } else {
+    targetCard.classList.remove('rush');
+    targetPartEl.textContent = 'HEAD';
+    targetMultEl.textContent = '×2';
+  }
+}
+
+let shake = 0;
+function registerHit(cap, power, worldPoint, dir, metal) {
   const now = performance.now();
-  if (now - game.lastHitTime < 1400) game.combo++; else game.combo = 1;
+
+  // Target Rush: only the lit weak-point advances the chain.
+  let onTarget = true;
+  let mult = cap.scoreMul || 1;
+  if (game.mode === 'rush') {
+    onTarget = rush.active && cap === rush.cap && worldPoint.distanceTo(rush.worldPos) < rush.radius;
+    if (onTarget) {
+      mult = rush.mult * 1.5;      // precision bonus
+      rush.pulse = 1;
+      spawnRushTarget();           // immediately light the next one
+    } else {
+      // glancing off-target hit: small feedback, no combo, keep the chain alive
+      burst(worldPoint, dir, power * 0.4, swordSparkColor);
+      playHit(power * 0.5, metal);
+      applyImpulse(worldPoint, dir, power * 0.5);
+      spawnDamageNumber(worldPoint, '' + Math.round(power * 0.6), 'graze');
+      return;
+    }
+  }
+
+  game.hits++;
+  if (now - game.lastHitTime < CFG.comboWindowMs) game.combo++; else game.combo = 1;
   game.lastHitTime = now;
   game.bestCombo = Math.max(game.bestCombo, game.combo);
 
-  const score = Math.round(power * (part.scoreMul || 1));
+  const isHead = cap.name === 'head';
+  const isPerfect = power > 78;
+  const base = power * mult * 2.4;
+  const comboFactor = 1 + (game.combo - 1) * 0.14;
+  const dmg = Math.round(base * comboFactor);
+  game.score += dmg;
+
+  // HUD numbers
+  scoreN.textContent = game.score.toLocaleString();
   hitsN.textContent = game.hits;
   bestComboEl.textContent = game.bestCombo;
-  const label = part.name === 'head' ? 'HEADSHOT! ' : '';
-  comboText.textContent = game.combo > 1 ? `${label}${game.combo}× COMBO  +${score * game.combo}` : `${label}+${score}`;
-  comboText.style.opacity = 1;
-  clearTimeout(registerHit._t);
-  registerHit._t = setTimeout(() => { comboText.style.opacity = 0.0; }, 900);
+  updateComboUI();
+
+  // floating number
+  let cls = '';
+  if (isHead) cls = 'crit';
+  else if (isPerfect) cls = 'perfect';
+  else if (mult >= 1.5) cls = 'big';
+  spawnDamageNumber(worldPoint, (isHead ? 'CRIT ' : '') + dmg, cls);
+  if (isHead) announce('CRITICAL!', '#ff4d6d');
+  else if (isPerfect && game.combo < 5) announce('PERFECT!', '#a48bff');
 
   // effects
-  burst(worldPoint, dir, power);
+  burst(worldPoint, dir, power, swordSparkColor);
+  impactLight.color.setHex(isHead ? 0xff9db0 : 0xffd9a0);
   impactLight.position.copy(worldPoint);
-  impactLight.intensity = 3.5 + power * 0.05;
-  playHit(power, metal);
-  // flash
-  flashEl.style.background = `radial-gradient(circle at 50% 55%, rgba(255,255,255,${Math.min(0.28, power / 260)}), rgba(255,255,255,0) 60%)`;
+  impactLight.intensity = 4 + power * 0.06;
+  swordHitFX(worldPoint, dir, power);
+  playHit(power, metal || currentSkin !== 'oak');
+  flashEl.style.background = `radial-gradient(circle at 50% 55%, rgba(255,240,210,${Math.min(0.3, power / 240)}), rgba(255,255,255,0) 60%)`;
   clearTimeout(registerHit._f);
   registerHit._f = setTimeout(() => { flashEl.style.background = 'none'; }, 70);
+  shake = Math.min(0.13, 0.03 + power * 0.0011);
 
-  // impulse into dummy (horizontal push in blade-motion direction, lever = hit height)
+  applyImpulse(worldPoint, dir, power);
+
+  if (net && net.joined) net.send({ t: 'haptic', ms: Math.min(70, 18 + power * 0.5) });
+}
+
+function applyImpulse(worldPoint, dir, power) {
   const lever = THREE.MathUtils.clamp((worldPoint.y - PIVOT_Y) / 1.2, 0.15, 1.2);
   const push = new THREE.Vector3(dir.x, 0, dir.z);
   const mag = Math.min(1.6, power * CFG.impulseScale) * lever;
-  dummy.velX += push.z * mag;      // push +z tilts top toward +z
-  dummy.velZ -= push.x * mag;      // push +x tilts top toward +x (see notes)
+  dummy.velX += push.z * mag;
+  dummy.velZ -= push.x * mag;
   dummy.velT += (dir.x * 0.4 - dir.z * 0.2) * mag * 0.6;
   dummy.hitPulse = 1;
-
-  // haptic back to phone
-  if (net && net.joined) net.send({ t: 'haptic', ms: Math.min(60, 15 + power * 0.4) });
 }
 
 // ---------------------------------------------------------------------------
@@ -661,7 +1093,6 @@ const curTrailInner = new THREE.Vector3();
 let haveTip = false;
 const _mq = new THREE.Quaternion();
 const _rel = new THREE.Quaternion();
-const _seg = { a: new THREE.Vector3(), b: new THREE.Vector3() };
 const bladeVel = new THREE.Vector3();
 
 function updateSwordOrientation() {
@@ -673,7 +1104,6 @@ function updateSwordOrientation() {
     _mq.setFromEuler(new THREE.Euler(input.mPitch - 0.42 - thrust, input.mYaw, 0, 'YXZ'));
     sword.quaternion.copy(_mq);
   } else {
-    // relative to calibration, then mounted into the guard stance
     _rel.copy(input.refInv).multiply(input.rawQ);
     sword.quaternion.copy(_rel).multiply(mountQ);
   }
@@ -681,7 +1111,6 @@ function updateSwordOrientation() {
 }
 
 function updateDummy(dt) {
-  // damped spring toward upright
   const ax = -CFG.springK * dummy.leanX - CFG.springC * dummy.velX;
   const az = -CFG.springK * dummy.leanZ - CFG.springC * dummy.velZ;
   const at = -CFG.springK * 0.6 * dummy.twist - CFG.springC * dummy.velT;
@@ -691,17 +1120,42 @@ function updateDummy(dt) {
   dummy.leanZ = THREE.MathUtils.clamp(dummy.leanZ, -CFG.maxLean, CFG.maxLean);
   body.rotation.set(dummy.leanX, dummy.twist, dummy.leanZ, 'YXZ');
   dummy.hitPulse = Math.max(0, dummy.hitPulse - dt * 3);
-  ring.material.opacity = 0.35 + dummy.hitPulse * 0.5;
+  ring.material.opacity = 0.4 + dummy.hitPulse * 0.5;
   ring.scale.setScalar(1 + dummy.hitPulse * 0.12);
 }
 
-// Reusable capsule list, rebuilt to world space each frame.
+let animTime = 0;
+function updateRush(dt) {
+  if (game.mode !== 'rush') return;
+  if (!rush.active) return;
+  // keep marker glued to the moving weak-point, facing the camera
+  targetWorldPos(rush.cap, rush.worldPos);
+  targetMarker.position.copy(rush.worldPos);
+  targetMarker.lookAt(camera.position);
+  const pulse = 1 + Math.sin(animTime * 9) * 0.12 + rush.pulse * 0.6;
+  targetMarker.scale.setScalar(pulse);
+  rush.pulse = Math.max(0, rush.pulse - dt * 4);
+  // countdown ring shrinks; colour warms as time runs out
+  rush.time -= dt;
+  const frac = Math.max(0, rush.time / rush.maxTime);
+  targetMarker.userData.timer.scale.setScalar(0.5 + frac * 0.9);
+  targetMarker.userData.timerMat.opacity = 0.3 + frac * 0.5;
+  if (rush.time <= 0) {
+    // missed in time — break the chain
+    if (game.combo > 1) announce('CHAIN LOST', '#8b93b8');
+    game.combo = 0;
+    updateComboUI();
+    playChime(180, 0.18);
+    spawnRushTarget();
+  }
+}
+
 const _worldCaps = [];
 const _iBase = new THREE.Vector3();
 const _iTip = new THREE.Vector3();
 const _hitPt = new THREE.Vector3();
 
-function checkHits(dt) {
+function checkHits() {
   if (!haveTip) return;
   const speed = bladeVel.length();
   speedN.textContent = speed.toFixed(1);
@@ -715,28 +1169,16 @@ function checkHits(dt) {
   const power = Math.min(100, speed * 8.5);
   const dir = bladeVel.clone().normalize();
   const now = performance.now();
-
   body.updateMatrixWorld(true);
 
-  // Gather all collision capsules in world space once.
   _worldCaps.length = 0;
   for (const p of parts) {
-    _worldCaps.push({
-      a: p.a.clone().applyMatrix4(p.mesh.matrixWorld),
-      b: p.b.clone().applyMatrix4(p.mesh.matrixWorld),
-      radius: p.radius, meta: p,
-    });
+    _worldCaps.push({ a: p.a.clone().applyMatrix4(p.mesh.matrixWorld), b: p.b.clone().applyMatrix4(p.mesh.matrixWorld), radius: p.radius, meta: p });
   }
   for (const c of bodyCapsules) {
-    _worldCaps.push({
-      a: c.a.clone().applyMatrix4(body.matrixWorld),
-      b: c.b.clone().applyMatrix4(body.matrixWorld),
-      radius: c.radius, meta: c,
-    });
+    _worldCaps.push({ a: c.a.clone().applyMatrix4(body.matrixWorld), b: c.b.clone().applyMatrix4(body.matrixWorld), radius: c.radius, meta: c });
   }
 
-  // Continuous collision: sweep the blade from its previous pose to the current
-  // one in small sub-steps so a fast swing can't tunnel through the dummy.
   const tipTravel = curTip.distanceTo(prevTip);
   const steps = THREE.MathUtils.clamp(Math.ceil(tipTravel / 0.05), 1, 16);
   for (let s = 1; s <= steps; s++) {
@@ -745,8 +1187,7 @@ function checkHits(dt) {
     _iTip.copy(prevTip).lerp(curTip, f);
     for (const cap of _worldCaps) {
       const d = segSegClosest(_iBase, _iTip, cap.a, cap.b, _c1, _c2);
-      const clearance = d - cap.radius;
-      if (clearance < CFG.bladeRadius && now - cap.meta.cd >= CFG.hitCooldownMs) {
+      if (d - cap.radius < CFG.bladeRadius && now - cap.meta.cd >= CFG.hitCooldownMs) {
         cap.meta.cd = now;
         _hitPt.copy(_c2).lerp(_c1, 0.5);
         registerHit(cap.meta, power, _hitPt.clone(), dir, cap.meta.name === 'head');
@@ -755,28 +1196,53 @@ function checkHits(dt) {
   }
 }
 
+const _camOff = new THREE.Vector3();
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
+  animTime += dt;
 
   updateSwordOrientation();
 
-  // world tip / base for physics + trail
   curBase.copy(BLADE_BASE_LOCAL).applyQuaternion(sword.quaternion).add(sword.position);
   curTip.copy(BLADE_TIP_LOCAL).applyQuaternion(sword.quaternion).add(sword.position);
   curTrailInner.copy(BLADE_TRAIL_LOCAL).applyQuaternion(sword.quaternion).add(sword.position);
   if (haveTip && dt > 0) bladeVel.copy(curTip).sub(prevTip).multiplyScalar(1 / dt);
   else bladeVel.set(0, 0, 0);
 
-  // Collision uses prev*+cur* (swept), so run it before updating prev*.
-  if (game.running) checkHits(dt);
+  if (game.running) checkHits();
   prevTip.copy(curTip);
   prevBase.copy(curBase);
   haveTip = true;
 
+  // combo expiry
+  if (game.combo > 0 && performance.now() - game.lastHitTime > CFG.comboWindowMs) {
+    if (game.mode !== 'rush') { game.combo = 0; updateComboUI(); }
+  }
+
   updateDummy(dt);
+  updateRush(dt);
   updateSparks(dt);
+
+  // fire blade continuously sheds embers along its length
+  if (swordEffect === 'fire' && game.running) {
+    emitEmber(curTrailInner);
+    if (Math.random() < 0.6) emitEmber(curBase.clone().lerp(curTip, 0.45));
+    fxLight.intensity = 2.4 + Math.sin(animTime * 22) * 0.7;
+  }
+  updateEmbers(dt);
+  updateIceShards(dt);
   impactLight.intensity *= 0.86;
+
+  // brazier flicker
+  const fl = 0.85 + Math.sin(animTime * 13) * 0.1 + Math.sin(animTime * 7.3) * 0.06;
+  braziers[0].intensity = 12 * fl; braziers[1].intensity = 12 * (1.7 - fl);
+
+  // camera shake decay
+  shake *= 0.86;
+  _camOff.set((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5) * 0.4).multiplyScalar(shake);
+  camera.position.copy(CFG.camPos).add(_camOff);
+  camera.lookAt(CFG.camLook);
 
   renderer.render(scene, camera);
 }
@@ -798,32 +1264,20 @@ function setPair(connected) {
   pairDot.className = 'dot ' + (connected ? 'on' : 'warn');
   pairStatus.textContent = connected ? 'phone connected!' : 'waiting for phone…';
   startBtn.disabled = false;
-  if (connected && !game.running) {
-    // auto-enter shortly after phone connects
-    startBtn.textContent = 'Enter Arena ▶';
-  }
+  if (connected && !game.running) startBtn.textContent = 'Enter Arena ▶';
 }
 
 function setupNetworked() {
   roomCode = makeRoomCode();
   roomCodeEl.textContent = roomCode;
-  // Resolve relative to the current page so it works both at the server root
-  // and at a subpath (e.g. GitHub Pages /iSword/).
   const url = new URL('controller.html?room=' + roomCode, location.href).href;
   joinUrlEl.textContent = new URL('controller.html', location.href).href.replace(/^https?:\/\//, '');
-  // QR (davidshimjs/qrcodejs renders into the #qr element)
   if (window.QRCode && $('qr')) {
     try {
       $('qr').innerHTML = '';
-      new window.QRCode($('qr'), {
-        text: url, width: 132, height: 132,
-        colorDark: '#0a0d17', colorLight: '#ffffff',
-        correctLevel: window.QRCode.CorrectLevel.M,
-      });
+      new window.QRCode($('qr'), { text: url, width: 132, height: 132, colorDark: '#0a0d17', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M });
     } catch { qrBox.style.display = 'none'; }
-  } else if (qrBox) {
-    qrBox.style.display = 'none';
-  }
+  } else if (qrBox) qrBox.style.display = 'none';
 
   net = new Net({
     role: 'game', room: roomCode,
@@ -837,6 +1291,29 @@ function setupNetworked() {
 }
 
 // ---------------------------------------------------------------------------
+// Mode + skin selection (start overlay)
+// ---------------------------------------------------------------------------
+function selectMode(m) {
+  game.mode = m;
+  document.querySelectorAll('.mode-opt').forEach((el) => el.classList.toggle('sel', el.dataset.mode === m));
+  bannerTitle.textContent = m === 'rush' ? 'TARGET RUSH' : 'SWING TO STRIKE';
+}
+function selectSkin(id) {
+  applySkin(id);
+  document.querySelectorAll('.skin-opt').forEach((el) => el.classList.toggle('sel', el.dataset.skin === id));
+}
+function selectSword(id) {
+  setSwordSkin(id);
+  document.querySelectorAll('.sword-opt').forEach((el) => el.classList.toggle('sel', el.dataset.sword === id));
+}
+document.querySelectorAll('.mode-opt').forEach((el) => el.addEventListener('click', () => selectMode(el.dataset.mode)));
+document.querySelectorAll('.skin-opt').forEach((el) => el.addEventListener('click', () => selectSkin(el.dataset.skin)));
+document.querySelectorAll('.sword-opt').forEach((el) => el.addEventListener('click', () => selectSword(el.dataset.sword)));
+selectMode('free');
+selectSkin('oak');
+selectSword('classic');
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 function enterArena() {
@@ -845,6 +1322,11 @@ function enterArena() {
   game.running = true;
   initAudio();
   ensureWhoosh();
+  scoreN.textContent = '0';
+  updateTargetCard();
+  setHint(defaultHint());
+  bannerTitle.textContent = game.mode === 'rush' ? 'TARGET RUSH' : 'SWING TO STRIKE';
+  if (game.mode === 'rush') spawnRushTarget(); else clearRushTarget();
 }
 
 startBtn.addEventListener('click', async () => {
@@ -861,22 +1343,21 @@ mouseBtn.addEventListener('click', () => {
   initAudio();
   setupMouse();
   enterArena();
-  hintPill.innerHTML = 'Move mouse to aim · move fast to strike · click to thrust';
+  setHint('Move mouse to aim · move fast to strike · click to thrust');
 });
 
 if (LOCAL_MODE) {
-  // Solo mode: no pairing UI needed.
   qrBox.style.display = 'none';
   roomCodeEl.textContent = 'SOLO';
   joinUrlEl.textContent = 'this device';
   pairStatus.textContent = 'solo mode — this phone is the sword';
   pairDot.className = 'dot on';
   startBtn.textContent = 'Start & Enable Motion';
-  document.querySelectorAll('.step')[1].style.display = 'none';
+  const pairBlock = $('pairBlock');
+  if (pairBlock) pairBlock.style.display = 'none';
   localHint.textContent = 'Tap the screen any time to re-calibrate your neutral stance.';
 } else {
   setupNetworked();
 }
 
-// Small public handle for debugging / automated tests.
-window.iSword = { sword, dummy, game, input, calibrate };
+window.iSword = { sword, dummy, game, input, calibrate, selectMode, selectSkin, selectSword, setSwordSkin, spawnRushTarget };

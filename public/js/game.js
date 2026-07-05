@@ -1110,24 +1110,44 @@ const enemySword = buildEnemySword();
 enemySword.visible = false;
 scene.add(enemySword);
 
-const enemyHand = new THREE.Vector3(0.26, 1.26, 0.32);
+// The dummy faces you, so its RIGHT hand is on your left (screen -x) — the
+// mirror of your own grip.
+const enemyHand = new THREE.Vector3(-0.26, 1.26, 0.32);
 const Q = (x, y, z) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'YXZ'));
-// Blade rests along +Y (up); ~+1.5 rad of pitch aims it forward at the player.
-const enemyGuard = Q(-0.45, 0.15, -0.3);
-const enemyWindup = Q(-1.3, 0.45, -0.6);
-const enemyStrikePoses = [
-  Q(1.55, 0.0, 0.05),    // straight thrust / chop to centre
-  Q(1.42, -0.38, 0.18),  // diagonal from your left
-  Q(1.42, 0.34, -0.12),  // diagonal from your right
-  Q(1.62, 0.0, -0.05),   // low thrust
+const enemyGuard = Q(-0.45, -0.15, 0.3);
+
+// Each attack ends by aiming the blade (local +Y) from the hand at a point on
+// your body; the wind-up offset decides which arc it swings through, so the
+// four swings come at you from clearly different directions.
+const UP = new THREE.Vector3(0, 1, 0);
+const AX_X = new THREE.Vector3(1, 0, 0), AX_Y = new THREE.Vector3(0, 1, 0);
+function aimQuat(target, out) {
+  const d = target.clone().sub(enemyHand).normalize();
+  return out.setFromUnitVectors(UP, d);
+}
+const ENEMY_ATTACKS = [
+  { name: 'overhead', aim: new THREE.Vector3(0.0, 1.55, 1.0), axis: AX_X, wind: -2.3, dur: 0.30 },
+  { name: 'slashL',   aim: new THREE.Vector3(-0.30, 1.34, 1.0), axis: AX_Y, wind: 1.8, dur: 0.26 },
+  { name: 'slashR',   aim: new THREE.Vector3(0.30, 1.34, 1.0), axis: AX_Y, wind: -1.8, dur: 0.26 },
+  { name: 'thrust',   aim: new THREE.Vector3(0.0, 1.2, 1.05), axis: AX_X, wind: 1.4, dur: 0.22 },
 ];
 
 const enemy = {
   L: enemySword.userData.L, grip: enemySword.userData.grip,
   q: enemyGuard.clone(), state: 'idle', t: 0, nextT: 1.2, stun: 0,
-  strikeQ: enemyStrikePoses[0], resolved: false,
+  strikeQ: new THREE.Quaternion(), windupQ: new THREE.Quaternion(),
+  strikeDur: 0.28, attackName: '', resolved: false,
   base: new THREE.Vector3(), tip: new THREE.Vector3(), prevTip: new THREE.Vector3(),
 };
+const _offQ = new THREE.Quaternion();
+function pickEnemyAttack() {
+  const atk = ENEMY_ATTACKS[Math.floor(Math.random() * ENEMY_ATTACKS.length)];
+  enemy.attackName = atk.name;
+  enemy.strikeDur = atk.dur;
+  aimQuat(atk.aim, enemy.strikeQ);
+  _offQ.setFromAxisAngle(atk.axis, atk.wind);
+  enemy.windupQ.copy(_offQ).multiply(enemy.strikeQ);
+}
 
 const playerZone = new THREE.Vector3(0, 1.34, 1.0); // your body — enemy blade reaching here hits you
 const PLAYER_HIT_R = 0.34;
@@ -1203,20 +1223,20 @@ function updateDuel(dt) {
         enemy.t += dt;
         if (enemy.t >= enemy.nextT && enemy.stun <= 0) {
           enemy.state = 'windup'; enemy.t = 0; enemy.resolved = false;
-          enemy.strikeQ = enemyStrikePoses[Math.floor(Math.random() * enemyStrikePoses.length)];
+          pickEnemyAttack();
           if (blockPrompt) blockPrompt.classList.add('show');
         }
         break;
       case 'windup':
-        enemy.q.slerp(enemyWindup, 1 - Math.pow(0.0006, dt));
+        enemy.q.slerp(enemy.windupQ, 1 - Math.pow(0.0006, dt));
         enemySword.userData.glow.intensity = 1.6 + Math.sin(animTime * 20) * 0.8;
         enemy.t += dt;
-        if (enemy.t >= 0.55) { enemy.state = 'strike'; enemy.t = 0; }
+        if (enemy.t >= 0.5) { enemy.state = 'strike'; enemy.t = 0; }
         break;
       case 'strike':
-        enemy.q.slerp(enemy.strikeQ, 1 - Math.pow(1e-6, dt));
+        enemy.q.slerp(enemy.strikeQ, 1 - Math.pow(1e-7, dt));
         enemy.t += dt;
-        if (enemy.t >= 0.34) { enemy.state = 'recover'; enemy.t = 0; }
+        if (enemy.t >= enemy.strikeDur + 0.06) { enemy.state = 'recover'; enemy.t = 0; }
         break;
       case 'recover':
         enemy.q.slerp(enemyGuard, 1 - Math.pow(0.01, dt));
@@ -1370,8 +1390,12 @@ function checkHits() {
 }
 
 const _camOff = new THREE.Vector3();
+const _camDir = new THREE.Vector3();
 const camBase = CFG.camPos.clone();
 const camLookAt = CFG.camLook.clone();
+let zoomLevel = 1; // <1 zoomed in (closer), >1 zoomed out
+const ZOOM_MIN = 0.5, ZOOM_MAX = 1.9;
+function setZoom(z) { zoomLevel = THREE.MathUtils.clamp(z, ZOOM_MIN, ZOOM_MAX); }
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
@@ -1417,7 +1441,8 @@ function animate() {
   // camera shake decay
   shake *= 0.86;
   _camOff.set((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5) * 0.4).multiplyScalar(shake);
-  camera.position.copy(camBase).add(_camOff);
+  _camDir.copy(camBase).sub(camLookAt).multiplyScalar(zoomLevel);
+  camera.position.copy(camLookAt).add(_camDir).add(_camOff);
   camera.lookAt(camLookAt);
 
   renderer.render(scene, camera);
@@ -1517,6 +1542,21 @@ function enterArena() {
 window.addEventListener('pointerdown', () => {
   if (game.mode === 'duel' && game.duelOver && game.running) startDuel();
 });
+
+// --- Zoom: on-screen buttons (universal), mouse wheel, and pinch ------------
+const zoomInBtn = $('zoomIn'), zoomOutBtn = $('zoomOut');
+if (zoomInBtn) zoomInBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); setZoom(zoomLevel * 0.85); });
+if (zoomOutBtn) zoomOutBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); setZoom(zoomLevel * 1.18); });
+window.addEventListener('wheel', (e) => { setZoom(zoomLevel * (e.deltaY > 0 ? 1.08 : 0.925)); }, { passive: true });
+let pinchDist = 0;
+window.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 2) {
+    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    if (pinchDist) setZoom(zoomLevel * (pinchDist / d)); // spread fingers -> zoom in
+    pinchDist = d;
+  }
+}, { passive: true });
+window.addEventListener('touchend', () => { pinchDist = 0; });
 
 startBtn.addEventListener('click', async () => {
   initAudio();

@@ -97,6 +97,13 @@ public/
   parry, or take the hit. Player + enemy health, victory / defeat, tap to rematch.
 - **Drone Slayer** — drones swarm in from the dark; slash them out of the air
   before they reach you.
+- **Gold Rush** — idle-clicker (Tap Titans-style): every hit pays gold with a
+  coin *cha-ching*; kill the dummy to level it up (exponential HP, level-up
+  bonus, new look every 5 levels — endless hue tiers after gold). Spend gold in
+  the 🛒 shop: Sharpen Blade (+25% dmg/lv), Golden Touch (+20% gold/lv),
+  Critical Edge (crit chance), Squire (auto-hits), plus buyable swords that
+  boost gold (Katana +25%, Fire +50%, Ice +100%) and a richer coin sound.
+  Progress saves automatically in the browser.
 
 ## Controls & extras
 

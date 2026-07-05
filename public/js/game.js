@@ -848,9 +848,9 @@ function calibrate() {
   setTimeout(() => setHint(defaultHint()), 1600);
 }
 function defaultHint() {
-  return game.mode === 'rush'
-    ? 'Strike the <b>glowing point</b> before it fades · chain them!'
-    : 'Swing to strike · aim for the <b>head</b> for 2×';
+  if (game.mode === 'rush') return 'Strike the <b>glowing point</b> before it fades · chain them!';
+  if (game.mode === 'duel') return 'The dummy strikes back — <b>block its blade with yours</b>, then counter!';
+  return 'Swing to strike · aim for the <b>head</b> for 2×';
 }
 
 function applyIMU(msg) {
@@ -926,6 +926,7 @@ function segSegClosest(p1, q1v, p2, q2v, outC1, outC2) {
 const game = {
   mode: 'free', score: 0, hits: 0, combo: 0, bestCombo: 0,
   lastHitTime: -999, running: false, lastTier: -1,
+  playerHP: 100, enemyHP: 130, duelOver: false,
 };
 
 const TIERS = [
@@ -1066,6 +1067,7 @@ function registerHit(cap, power, worldPoint, dir, metal) {
   shake = Math.min(0.13, 0.03 + power * 0.0011);
 
   applyImpulse(worldPoint, dir, power);
+  if (game.mode === 'duel') damageEnemy(power, mult);
 
   if (net && net.joined) net.send({ t: 'haptic', ms: Math.min(70, 18 + power * 0.5) });
 }
@@ -1078,6 +1080,177 @@ function applyImpulse(worldPoint, dir, power) {
   dummy.velZ -= push.x * mag;
   dummy.velT += (dir.x * 0.4 - dir.z * 0.2) * mag * 0.6;
   dummy.hitPulse = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Duel mode — the dummy fights back; block its blade with your own
+// ---------------------------------------------------------------------------
+const duelHud = $('duelHud');
+const enemyHpEl = $('enemyHp');
+const playerHpEl = $('playerHp');
+const blockPrompt = $('blockPrompt');
+
+function buildEnemySword() {
+  const g = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: 0xc6ccd6, metalness: 1, roughness: 0.3, envMapIntensity: 1.2 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2a1414, metalness: 0.3, roughness: 0.75 });
+  const bronze = new THREE.MeshStandardMaterial({ color: 0x7a4a24, metalness: 1, roughness: 0.45 });
+  const L = 0.8, grip = 0.12;
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, L * 0.85, 0.012), steel);
+  blade.position.y = grip + L * 0.42; blade.castShadow = true; g.add(blade);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.028, L * 0.16, 4), steel);
+  tip.position.y = grip + L * 0.85 + L * 0.08; tip.rotation.y = Math.PI / 4; tip.scale.z = 0.3; tip.castShadow = true; g.add(tip);
+  const gd = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.028, 0.045), bronze); gd.position.y = grip; g.add(gd);
+  const gp = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.018, grip, 12), dark); gp.position.y = grip / 2; g.add(gp);
+  const glow = new THREE.PointLight(0xff3018, 0, 2.2, 2); glow.position.y = grip + L * 0.6; g.add(glow);
+  g.userData = { L, grip, glow };
+  return g;
+}
+const enemySword = buildEnemySword();
+enemySword.visible = false;
+scene.add(enemySword);
+
+const enemyHand = new THREE.Vector3(0.26, 1.26, 0.32);
+const Q = (x, y, z) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'YXZ'));
+// Blade rests along +Y (up); ~+1.5 rad of pitch aims it forward at the player.
+const enemyGuard = Q(-0.45, 0.15, -0.3);
+const enemyWindup = Q(-1.3, 0.45, -0.6);
+const enemyStrikePoses = [
+  Q(1.55, 0.0, 0.05),    // straight thrust / chop to centre
+  Q(1.42, -0.38, 0.18),  // diagonal from your left
+  Q(1.42, 0.34, -0.12),  // diagonal from your right
+  Q(1.62, 0.0, -0.05),   // low thrust
+];
+
+const enemy = {
+  L: enemySword.userData.L, grip: enemySword.userData.grip,
+  q: enemyGuard.clone(), state: 'idle', t: 0, nextT: 1.2, stun: 0,
+  strikeQ: enemyStrikePoses[0], resolved: false,
+  base: new THREE.Vector3(), tip: new THREE.Vector3(), prevTip: new THREE.Vector3(),
+};
+
+const playerZone = new THREE.Vector3(0, 1.34, 1.0); // your body — enemy blade reaching here hits you
+const PLAYER_HIT_R = 0.34;
+const BLOCK_DIST = 0.18;
+const ENEMY_MAX = 130, PLAYER_MAX = 100;
+
+const _eB = new THREE.Vector3(), _eT = new THREE.Vector3();
+const _cc1 = new THREE.Vector3(), _cc2 = new THREE.Vector3(), _mid = new THREE.Vector3();
+
+function updateDuelHUD() {
+  if (enemyHpEl) enemyHpEl.style.width = Math.max(0, (game.enemyHP / ENEMY_MAX) * 100) + '%';
+  if (playerHpEl) playerHpEl.style.width = Math.max(0, (game.playerHP / PLAYER_MAX) * 100) + '%';
+}
+function startDuel() {
+  game.playerHP = PLAYER_MAX; game.enemyHP = ENEMY_MAX; game.duelOver = false;
+  enemy.state = 'idle'; enemy.t = 0; enemy.nextT = 1.1; enemy.stun = 0; enemy.resolved = false;
+  enemy.q.copy(enemyGuard);
+  enemySword.visible = true;
+  enemySword.userData.glow.intensity = 0;
+  updateDuelHUD();
+  if (blockPrompt) blockPrompt.classList.remove('show');
+  setHint('The dummy strikes back — <b>block its blade with yours</b>, then counter!');
+}
+function damageEnemy(power, mult) {
+  if (game.duelOver) return;
+  game.enemyHP -= 6 + power * 0.11 * mult;
+  enemy.stun = Math.max(enemy.stun, 0.25);
+  if (enemy.state === 'windup') { enemy.state = 'recover'; enemy.t = 0; if (blockPrompt) blockPrompt.classList.remove('show'); }
+  updateDuelHUD();
+  if (game.enemyHP <= 0) { game.enemyHP = 0; updateDuelHUD(); endDuel(true); }
+}
+function endDuel(win) {
+  game.duelOver = true;
+  enemy.state = 'idle'; enemy.q.copy(enemyGuard);
+  if (blockPrompt) blockPrompt.classList.remove('show');
+  announce(win ? 'VICTORY!' : 'DEFEATED', win ? '#ffd166' : '#ff4d6d');
+  setHint(win ? 'You bested the dummy! · <b>tap to fight again</b>' : 'The dummy won this round · <b>tap to fight again</b>');
+  playChime(win ? 720 : 150, 0.5);
+}
+function onBlock(mid) {
+  enemy.resolved = true; enemy.state = 'recover'; enemy.t = 0; enemy.stun = 0.5;
+  if (blockPrompt) blockPrompt.classList.remove('show');
+  burst(mid, new THREE.Vector3(0, 1, 0.4).normalize(), 95, 0xfff0c0, 4.6);
+  impactLight.color.setHex(0xfff0c0); impactLight.position.copy(mid); impactLight.intensity = 5.5;
+  playHit(95, true);
+  shake = 0.12;
+  announce('PARRIED!', '#7fd4ff');
+  if (net && net.joined) net.send({ t: 'haptic', ms: 50 });
+}
+function onPlayerStruck() {
+  enemy.resolved = true; enemy.state = 'recover'; enemy.t = 0;
+  if (blockPrompt) blockPrompt.classList.remove('show');
+  game.playerHP -= 14;
+  game.combo = 0; updateComboUI();
+  updateDuelHUD();
+  flashEl.style.background = 'radial-gradient(circle at 50% 55%, rgba(255,40,40,0.36), rgba(255,0,0,0) 65%)';
+  clearTimeout(onPlayerStruck._f);
+  onPlayerStruck._f = setTimeout(() => { flashEl.style.background = 'none'; }, 150);
+  shake = 0.22;
+  playHit(60, false);
+  announce('HIT!', '#ff4d6d');
+  if (net && net.joined) net.send({ t: 'haptic', ms: 120 });
+  if (game.playerHP <= 0) { game.playerHP = 0; updateDuelHUD(); endDuel(false); }
+}
+function updateDuel(dt) {
+  enemy.stun = Math.max(0, enemy.stun - dt);
+  enemySword.position.copy(enemyHand);
+
+  if (!game.duelOver) {
+    switch (enemy.state) {
+      case 'idle':
+        enemy.q.slerp(enemyGuard, 1 - Math.pow(0.001, dt));
+        enemy.t += dt;
+        if (enemy.t >= enemy.nextT && enemy.stun <= 0) {
+          enemy.state = 'windup'; enemy.t = 0; enemy.resolved = false;
+          enemy.strikeQ = enemyStrikePoses[Math.floor(Math.random() * enemyStrikePoses.length)];
+          if (blockPrompt) blockPrompt.classList.add('show');
+        }
+        break;
+      case 'windup':
+        enemy.q.slerp(enemyWindup, 1 - Math.pow(0.0006, dt));
+        enemySword.userData.glow.intensity = 1.6 + Math.sin(animTime * 20) * 0.8;
+        enemy.t += dt;
+        if (enemy.t >= 0.55) { enemy.state = 'strike'; enemy.t = 0; }
+        break;
+      case 'strike':
+        enemy.q.slerp(enemy.strikeQ, 1 - Math.pow(1e-6, dt));
+        enemy.t += dt;
+        if (enemy.t >= 0.34) { enemy.state = 'recover'; enemy.t = 0; }
+        break;
+      case 'recover':
+        enemy.q.slerp(enemyGuard, 1 - Math.pow(0.01, dt));
+        enemySword.userData.glow.intensity *= 0.85;
+        if (blockPrompt) blockPrompt.classList.remove('show');
+        enemy.t += dt;
+        if (enemy.t >= 0.5) { enemy.state = 'idle'; enemy.t = 0; enemy.nextT = 0.7 + Math.random() * 1.0; }
+        break;
+    }
+  }
+  enemySword.quaternion.copy(enemy.q);
+  enemySword.updateMatrixWorld(true);
+
+  _eB.set(0, enemy.grip, 0).applyMatrix4(enemySword.matrixWorld);
+  _eT.set(0, enemy.grip + enemy.L, 0).applyMatrix4(enemySword.matrixWorld);
+  enemy.base.copy(_eB); enemy.tip.copy(_eT);
+
+  // Resolve the strike once, at the instant the incoming blade reaches you:
+  // if your blade is meeting theirs then → parry, otherwise you take the hit.
+  if (enemy.state === 'strike' && !enemy.resolved) {
+    const reach = segSegClosest(playerZone, playerZone, _eB, _eT, _cc1, _cc2);
+    if (reach < PLAYER_HIT_R) {
+      const d = segSegClosest(curBase, curTip, _eB, _eT, _cc1, _cc2);
+      const bladeLen = Math.max(0.001, curBase.distanceTo(curTip));
+      const contactS = _cc1.distanceTo(curBase) / bladeLen; // where on your blade
+      if (d < BLOCK_DIST && contactS > 0.28) {
+        _mid.copy(_cc1).lerp(_cc2, 0.5);
+        onBlock(_mid);
+      } else {
+        onPlayerStruck();
+      }
+    }
+  }
+  enemy.prevTip.copy(enemy.tip);
 }
 
 // ---------------------------------------------------------------------------
@@ -1197,6 +1370,8 @@ function checkHits() {
 }
 
 const _camOff = new THREE.Vector3();
+const camBase = CFG.camPos.clone();
+const camLookAt = CFG.camLook.clone();
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, clock.getDelta());
@@ -1222,6 +1397,7 @@ function animate() {
 
   updateDummy(dt);
   updateRush(dt);
+  if (game.mode === 'duel') updateDuel(dt);
   updateSparks(dt);
 
   // fire blade continuously sheds embers along its length
@@ -1241,8 +1417,8 @@ function animate() {
   // camera shake decay
   shake *= 0.86;
   _camOff.set((Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5) * 0.4).multiplyScalar(shake);
-  camera.position.copy(CFG.camPos).add(_camOff);
-  camera.lookAt(CFG.camLook);
+  camera.position.copy(camBase).add(_camOff);
+  camera.lookAt(camLookAt);
 
   renderer.render(scene, camera);
 }
@@ -1296,7 +1472,7 @@ function setupNetworked() {
 function selectMode(m) {
   game.mode = m;
   document.querySelectorAll('.mode-opt').forEach((el) => el.classList.toggle('sel', el.dataset.mode === m));
-  bannerTitle.textContent = m === 'rush' ? 'TARGET RUSH' : 'SWING TO STRIKE';
+  bannerTitle.textContent = m === 'duel' ? 'DUEL' : m === 'rush' ? 'TARGET RUSH' : 'SWING TO STRIKE';
 }
 function selectSkin(id) {
   applySkin(id);
@@ -1323,11 +1499,24 @@ function enterArena() {
   initAudio();
   ensureWhoosh();
   scoreN.textContent = '0';
+
+  const isDuel = game.mode === 'duel';
+  if (duelHud) duelHud.style.display = isDuel ? 'block' : 'none';
+  targetCard.style.display = isDuel ? 'none' : 'block';
+  if (isDuel) { camBase.set(0, 1.58, 1.5); camLookAt.set(0, 1.25, 0); }
+  else { camBase.copy(CFG.camPos); camLookAt.copy(CFG.camLook); }
+
   updateTargetCard();
   setHint(defaultHint());
-  bannerTitle.textContent = game.mode === 'rush' ? 'TARGET RUSH' : 'SWING TO STRIKE';
+  bannerTitle.textContent = isDuel ? 'DUEL' : game.mode === 'rush' ? 'TARGET RUSH' : 'SWING TO STRIKE';
   if (game.mode === 'rush') spawnRushTarget(); else clearRushTarget();
+  if (isDuel) startDuel(); else enemySword.visible = false;
 }
+
+// Tap to start a fresh duel once one is over.
+window.addEventListener('pointerdown', () => {
+  if (game.mode === 'duel' && game.duelOver && game.running) startDuel();
+});
 
 startBtn.addEventListener('click', async () => {
   initAudio();
@@ -1360,4 +1549,4 @@ if (LOCAL_MODE) {
   setupNetworked();
 }
 
-window.iSword = { sword, dummy, game, input, calibrate, selectMode, selectSkin, selectSword, setSwordSkin, spawnRushTarget };
+window.iSword = { sword, dummy, game, input, calibrate, selectMode, selectSkin, selectSword, setSwordSkin, spawnRushTarget, enemy, startDuel };

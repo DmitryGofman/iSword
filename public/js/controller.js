@@ -162,6 +162,13 @@ calBtn.addEventListener('click', () => {
   setTimeout(() => (calBtn.textContent = 'Hold still & Calibrate'), 1400);
 });
 
+// Tap anywhere on the play area (except buttons) to send a stab attack.
+playPanel.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('button')) return;
+  if (net) net.send({ t: 'stab' });
+  if (navigator.vibrate) navigator.vibrate(12);
+});
+
 // Keep the phone from sleeping while playing.
 let wakeLock = null;
 async function requestWakeLock() {

@@ -362,7 +362,7 @@ function makeArm(side) {
     shoulderLocal.clone().add(new THREE.Vector3(0.05 * side, -0.05, 0.12)));
   return arm;
 }
-makeArm(-1);
+const enemyArmStatic = makeArm(-1); // dummy's right arm — animated (rig) in Duel
 makeArm(1);
 
 applySkin('oak');
@@ -841,6 +841,15 @@ const input = {
   mYaw: 0, mPitch: 0, mYawT: 0, mPitchT: 0,
 };
 
+// Tap = stab: lunge the whole blade forward at the target, then draw back.
+const stab = { active: false, t: 0, dur: 0.34 };
+function triggerStab() {
+  if (stab.active && stab.t < 0.14) return; // debounce a held tap
+  stab.active = true; stab.t = 0;
+  setWhoosh(9);
+  if (typeof recordSwing === 'function') recordSwing('stab');
+}
+
 function calibrate() {
   input.refInv.copy(input.rawQ).invert();
   input.hasCalib = true;
@@ -850,7 +859,8 @@ function calibrate() {
 function defaultHint() {
   if (game.mode === 'rush') return 'Strike the <b>glowing point</b> before it fades · chain them!';
   if (game.mode === 'duel') return 'The dummy strikes back — <b>block its blade with yours</b>, then counter!';
-  return 'Swing to strike · aim for the <b>head</b> for 2×';
+  if (game.mode === 'drones') return 'Drones incoming — <b>slash them</b> before they reach you!';
+  return 'Swing to strike · <b>tap to stab</b> · aim for the head for 2×';
 }
 
 function applyIMU(msg) {
@@ -868,7 +878,6 @@ function setupMouse() {
     input.mYawT = -nx * 1.4;
     input.mPitchT = -ny * 1.3;
   });
-  window.addEventListener('pointerdown', () => { input.mThrust = 0.35; });
 }
 
 function setupLocalSensors() {
@@ -880,7 +889,6 @@ function setupLocalSensors() {
     if (!input.hasCalib) { input.refInv.copy(input.rawQ).invert(); input.hasCalib = true; }
   };
   window.addEventListener('deviceorientation', onO, true);
-  window.addEventListener('pointerdown', () => calibrate());
 }
 
 async function requestLocalMotionPermission() {
@@ -1121,9 +1129,10 @@ const enemyGuard = Q(-0.45, -0.15, 0.3);
 // four swings come at you from clearly different directions.
 const UP = new THREE.Vector3(0, 1, 0);
 const AX_X = new THREE.Vector3(1, 0, 0), AX_Y = new THREE.Vector3(0, 1, 0);
-function aimQuat(target, out) {
-  const d = target.clone().sub(enemyHand).normalize();
-  return out.setFromUnitVectors(UP, d);
+const _aimD = new THREE.Vector3();
+function aimQuat(target, out, from) {
+  _aimD.copy(target).sub(from).normalize();
+  return out.setFromUnitVectors(UP, _aimD);
 }
 const ENEMY_ATTACKS = [
   { name: 'overhead', aim: new THREE.Vector3(0.0, 1.55, 1.0), axis: AX_X, wind: -2.3, dur: 0.30 },
@@ -1142,11 +1151,35 @@ const enemy = {
 const _offQ = new THREE.Quaternion();
 function pickEnemyAttack() {
   const atk = ENEMY_ATTACKS[Math.floor(Math.random() * ENEMY_ATTACKS.length)];
+  enemy.attack = atk;
   enemy.attackName = atk.name;
   enemy.strikeDur = atk.dur;
-  aimQuat(atk.aim, enemy.strikeQ);
+  aimQuat(atk.aim, enemy.strikeQ, enemyHand);
   _offQ.setFromAxisAngle(atk.axis, atk.wind);
   enemy.windupQ.copy(_offQ).multiply(enemy.strikeQ);
+}
+
+// Animated sword-arm: a forearm that swings from the shoulder so the hand (and
+// sword) actually move with the strike, instead of the blade pivoting in place.
+const enemyArmRig = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.062, 1, 12), woodDark);
+enemyArmRig.castShadow = true;
+enemyArmRig.visible = false;
+scene.add(enemyArmRig);
+const enemyHandMesh = new THREE.Mesh(new THREE.SphereGeometry(0.085, 14, 12), woodDark);
+enemyHandMesh.castShadow = true; enemyHandMesh.visible = false;
+scene.add(enemyHandMesh);
+const enemyShoulder = new THREE.Vector3(-0.31, 1.42, 0.05);
+const ARM_LEN = 0.4;
+const ARM_GUARD = new THREE.Vector3(0.18, -0.55, 0.5).normalize();
+const ARM_WINDUP = new THREE.Vector3(-0.1, 0.85, -0.2).normalize();
+const ARM_STRIKE = new THREE.Vector3(0.28, -0.05, 0.95).normalize();
+const armDir = ARM_GUARD.clone();
+const _handPos = new THREE.Vector3();
+const _armVec = new THREE.Vector3();
+function armTargetFor(state) {
+  if (state === 'windup') return ARM_WINDUP;
+  if (state === 'strike') return ARM_STRIKE;
+  return ARM_GUARD;
 }
 
 const playerZone = new THREE.Vector3(0, 1.34, 1.0); // your body — enemy blade reaching here hits you
@@ -1214,7 +1247,6 @@ function onPlayerStruck() {
 }
 function updateDuel(dt) {
   enemy.stun = Math.max(0, enemy.stun - dt);
-  enemySword.position.copy(enemyHand);
 
   if (!game.duelOver) {
     switch (enemy.state) {
@@ -1247,6 +1279,21 @@ function updateDuel(dt) {
         break;
     }
   }
+
+  // Swing the sword-arm: the hand moves along the shoulder, so the arm & sword
+  // travel with the strike. The blade re-aims from wherever the hand is.
+  armDir.lerp(armTargetFor(enemy.state), 1 - Math.pow(enemy.state === 'strike' ? 1e-4 : 0.02, dt)).normalize();
+  _handPos.copy(enemyShoulder).addScaledVector(armDir, ARM_LEN);
+  enemySword.position.copy(_handPos);
+  if (enemy.state === 'strike' && enemy.attack) aimQuat(enemy.attack.aim, enemy.strikeQ, _handPos);
+  // orient the forearm from shoulder to hand
+  _armVec.copy(_handPos).sub(enemyShoulder);
+  const armLen = _armVec.length();
+  enemyArmRig.position.copy(enemyShoulder).addScaledVector(_armVec, 0.5);
+  enemyArmRig.quaternion.setFromUnitVectors(UP, _armVec.clone().normalize());
+  enemyArmRig.scale.set(1, armLen, 1);
+  enemyHandMesh.position.copy(_handPos);
+
   enemySword.quaternion.copy(enemy.q);
   enemySword.updateMatrixWorld(true);
 
@@ -1274,6 +1321,250 @@ function updateDuel(dt) {
 }
 
 // ---------------------------------------------------------------------------
+// Combo attacks — 4 swings in a series (or a named pattern) unleash a finisher
+// ---------------------------------------------------------------------------
+const COMBOS = [
+  { id: 'cross',  name: 'Cross Slash',   seq: ['left', 'right', 'left', 'right'], keys: '← → ← →', color: '#5cc8ff' },
+  { id: 'rising', name: 'Rising Dragon', seq: ['down', 'down', 'up'],             keys: '↓ ↓ ↑',   color: '#5ce08a' },
+  { id: 'skewer', name: 'Skewer',        seq: ['stab', 'stab', 'stab'],           keys: '⊙ ⊙ ⊙',   color: '#ffd166' },
+  { id: 'flurry', name: 'Blade Flurry',  seq: ['any', 'any', 'any', 'any'],       keys: '4 fast swings', color: '#ff5c7a' },
+];
+const swingBuf = []; // { dir, t }
+let swingArmed = true;
+function detectSwing(speed) {
+  if (stab.active) { swingArmed = false; return; } // stab records itself
+  if (speed < 2.6) swingArmed = true;
+  else if (speed > 6 && swingArmed) {
+    swingArmed = false;
+    let dir;
+    if (Math.abs(bladeVel.y) > Math.abs(bladeVel.x)) dir = bladeVel.y > 0 ? 'up' : 'down';
+    else dir = bladeVel.x > 0 ? 'right' : 'left';
+    recordSwing(dir);
+  }
+}
+function recordSwing(dir) {
+  const now = performance.now();
+  if (swingBuf.length && now - swingBuf[swingBuf.length - 1].t > 1200) swingBuf.length = 0;
+  swingBuf.push({ dir, t: now });
+  if (swingBuf.length > 6) swingBuf.shift();
+  for (const c of COMBOS) {
+    const n = c.seq.length;
+    if (swingBuf.length < n) continue;
+    let ok = true;
+    for (let i = 0; i < n; i++) {
+      const s = c.seq[n - 1 - i];
+      if (s !== 'any' && swingBuf[swingBuf.length - 1 - i].dir !== s) { ok = false; break; }
+    }
+    if (ok) { triggerCombo(c); swingBuf.length = 0; return; }
+  }
+}
+
+// expanding shockwave visual
+const comboRing = new THREE.Mesh(
+  new THREE.RingGeometry(0.5, 0.62, 48),
+  new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false })
+);
+comboRing.position.set(0, 1.15, 0.2);
+comboRing.rotation.x = 0;
+scene.add(comboRing);
+let comboFx = 0;
+
+function triggerCombo(c) {
+  announce(c.name.toUpperCase() + '!', c.color);
+  playChime(300, 0.12); setTimeout(() => playChime(600, 0.25), 90);
+  comboFx = 1;
+  comboRing.material.color.setHex(parseInt(c.color.slice(1), 16));
+  shake = 0.25;
+  flashEl.style.background = `radial-gradient(circle at 50% 55%, ${c.color}55, rgba(255,255,255,0) 60%)`;
+  clearTimeout(triggerCombo._f);
+  triggerCombo._f = setTimeout(() => { flashEl.style.background = 'none'; }, 160);
+
+  const bonus = 800;
+  game.score += bonus;
+  scoreN.textContent = game.score.toLocaleString();
+  spawnDamageNumber(new THREE.Vector3(0, 1.5, 0.2), 'COMBO +' + bonus, 'crit');
+
+  // big burst across the dummy
+  body.updateMatrixWorld(true);
+  for (const p of parts) {
+    const wp = p.a.clone().add(p.b).multiplyScalar(0.5).applyMatrix4(p.mesh.matrixWorld);
+    burst(wp, new THREE.Vector3(0, 1, 0.3).normalize(), 80, swordSparkColor, 4.5);
+  }
+  dummy.velX += 2.2; dummy.hitPulse = 1;
+
+  if (game.mode === 'duel' && !game.duelOver) {
+    game.enemyHP -= 42; enemy.stun = 1.2;
+    if (enemy.state === 'windup') { enemy.state = 'recover'; enemy.t = 0; if (blockPrompt) blockPrompt.classList.remove('show'); }
+    updateDuelHUD();
+    if (game.enemyHP <= 0) { game.enemyHP = 0; updateDuelHUD(); endDuel(true); }
+  }
+  if (game.mode === 'drones') {
+    for (const d of drones) if (d.alive) killDrone(d, true);
+  }
+}
+function updateComboFx(dt) {
+  if (comboFx <= 0) { comboRing.visible = false; return; }
+  comboFx = Math.max(0, comboFx - dt * 2);
+  comboRing.visible = true;
+  const s = 0.4 + (1 - comboFx) * 3.4;
+  comboRing.scale.setScalar(s);
+  comboRing.material.opacity = comboFx * 0.8;
+  comboRing.lookAt(camera.position);
+}
+
+// ---------------------------------------------------------------------------
+// Drone Slayer mode — flying drones swarm in; slash them out of the air
+// ---------------------------------------------------------------------------
+function buildDrone() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, metalness: 0.7, roughness: 0.4 });
+  const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13, 0), mat);
+  g.add(body);
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff3040 }));
+  led.position.set(0, 0, 0.12); g.add(led);
+  const glow = new THREE.PointLight(0xff3040, 0.6, 1.4, 2); g.add(glow);
+  const rotors = [];
+  for (const [x, z] of [[-0.15, -0.15], [0.15, -0.15], [-0.15, 0.15], [0.15, 0.15]]) {
+    const stalk = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.16), mat);
+    stalk.position.set(x * 0.6, 0.02, z * 0.6); stalk.lookAt(new THREE.Vector3(x, 0.05, z)); g.add(stalk);
+    const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.006, 14),
+      new THREE.MeshStandardMaterial({ color: 0x0f1218, metalness: 0.5, roughness: 0.6, transparent: true, opacity: 0.45 }));
+    rotor.position.set(x, 0.06, z); g.add(rotor); rotors.push(rotor);
+  }
+  g.userData = { rotors, led, body };
+  g.visible = false;
+  return g;
+}
+const DRONE_R = 0.16;
+const drones = [];
+for (let i = 0; i < 12; i++) {
+  const d = buildDrone();
+  scene.add(d);
+  drones.push({ group: d, alive: false, vel: new THREE.Vector3(), wobble: Math.random() * 6 });
+}
+const droneState = { spawnTimer: 0, spawnEvery: 1.4, killed: 0 };
+const droneHudEl = $('droneCount');
+
+function spawnDrone() {
+  const d = drones.find((x) => !x.alive);
+  if (!d) return;
+  const ang = Math.random() * Math.PI - Math.PI / 2; // in front arc
+  const r = 5 + Math.random() * 2;
+  d.group.position.set(Math.sin(ang) * r, 1.2 + Math.random() * 1.4, -Math.cos(ang) * r + 0.2);
+  d.alive = true; d.group.visible = true;
+  d.wobble = Math.random() * 6;
+}
+function killDrone(d, byCombo) {
+  if (!d.alive) return;
+  d.alive = false; d.group.visible = false;
+  droneState.killed++;
+  if (droneHudEl) droneHudEl.textContent = droneState.killed;
+  burst(d.group.position, new THREE.Vector3(0, 0.4, 1).normalize(), 70, 0xffb060, 4);
+  impactLight.color.setHex(0xffc070); impactLight.position.copy(d.group.position); impactLight.intensity = 4;
+  playHit(70, true);
+  const now = performance.now();
+  if (now - game.lastHitTime < CFG.comboWindowMs) game.combo++; else game.combo = 1;
+  game.lastHitTime = now; game.hits++;
+  game.bestCombo = Math.max(game.bestCombo, game.combo);
+  const pts = Math.round(150 * (1 + (game.combo - 1) * 0.14));
+  game.score += pts;
+  scoreN.textContent = game.score.toLocaleString();
+  hitsN.textContent = game.hits; bestComboEl.textContent = game.bestCombo;
+  updateComboUI();
+  spawnDamageNumber(d.group.position, '' + pts, byCombo ? 'crit' : 'big');
+}
+function startDrones() {
+  game.playerHP = PLAYER_MAX; game.dronesOver = false;
+  droneState.spawnTimer = 0; droneState.spawnEvery = 1.4; droneState.killed = 0;
+  game.score = 0; game.combo = 0; game.hits = 0;
+  scoreN.textContent = '0'; if (droneHudEl) droneHudEl.textContent = '0';
+  for (const d of drones) { d.alive = false; d.group.visible = false; }
+  updateDuelHUD();
+  setHint('Drones incoming — <b>slash them</b> before they reach you!');
+}
+const _dToPlayer = new THREE.Vector3();
+function updateDrones(dt) {
+  if (!game.dronesOver) {
+    droneState.spawnTimer += dt;
+    droneState.spawnEvery = Math.max(0.5, 1.4 - droneState.killed * 0.02);
+    if (droneState.spawnTimer >= droneState.spawnEvery) { droneState.spawnTimer = 0; spawnDrone(); }
+  }
+  for (const d of drones) {
+    if (!d.alive) continue;
+    d.wobble += dt * 6;
+    for (const r of d.group.userData.rotors) r.rotation.y += dt * 40;
+    d.group.userData.led.material.color.setHex((Math.sin(d.wobble * 2) > 0) ? 0xff3040 : 0x661018);
+    // steer toward the player
+    _dToPlayer.copy(playerZone).sub(d.group.position);
+    const dist = _dToPlayer.length();
+    _dToPlayer.normalize();
+    const spd = game.dronesOver ? 0 : (1.1 + droneState.killed * 0.02);
+    d.group.position.addScaledVector(_dToPlayer, spd * dt);
+    d.group.position.y += Math.sin(d.wobble) * 0.004;
+    d.group.lookAt(camera.position);
+    // slashed?
+    if (haveTip) {
+      const dd = segSegClosest(d.group.position, d.group.position, curBase, curTip, _cc1, _cc2);
+      if (dd < DRONE_R + CFG.bladeRadius && bladeVel.length() > 2.5) { killDrone(d, false); continue; }
+    }
+    // reached the player
+    if (dist < 0.55 && !game.dronesOver) {
+      d.alive = false; d.group.visible = false;
+      game.playerHP -= 12; game.combo = 0; updateComboUI(); updateDuelHUD();
+      flashEl.style.background = 'radial-gradient(circle at 50% 55%, rgba(255,40,40,0.34), rgba(255,0,0,0) 65%)';
+      clearTimeout(updateDrones._f); updateDrones._f = setTimeout(() => { flashEl.style.background = 'none'; }, 150);
+      shake = 0.2; playHit(50, false);
+      if (net && net.joined) net.send({ t: 'haptic', ms: 120 });
+      if (game.playerHP <= 0) {
+        game.playerHP = 0; updateDuelHUD(); game.dronesOver = true;
+        announce('OVERRUN!', '#ff4d6d');
+        setHint('Drones down: <b>' + droneState.killed + '</b> · score <b>' + game.score.toLocaleString() + '</b> · tap to retry');
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hitbox debug overlay (toggle in Settings) — see the real collision volumes
+// ---------------------------------------------------------------------------
+let debugHit = false;
+const debugGroup = new THREE.Group();
+debugGroup.visible = false;
+scene.add(debugGroup);
+const dbgMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, wireframe: true, transparent: true, opacity: 0.8 });
+const dbgMatE = new THREE.MeshBasicMaterial({ color: 0xff3366, wireframe: true, transparent: true, opacity: 0.9 });
+const dbgBlade = new THREE.Mesh(new THREE.CylinderGeometry(CFG.bladeRadius, CFG.bladeRadius, 1, 8), new THREE.MeshBasicMaterial({ color: 0x66ccff, wireframe: true }));
+debugGroup.add(dbgBlade);
+const dbgEnemyBlade = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 8), dbgMatE);
+debugGroup.add(dbgEnemyBlade);
+const dbgParts = [];
+for (const p of parts) {
+  const len = p.a.distanceTo(p.b);
+  const m = new THREE.Mesh(new THREE.CapsuleGeometry(p.radius, len, 4, 10), dbgMat);
+  debugGroup.add(m); dbgParts.push({ m, p });
+}
+function segToMesh(mesh, a, b) {
+  const v = b.clone().sub(a);
+  const len = Math.max(0.001, v.length());
+  mesh.position.copy(a).addScaledVector(v, 0.5);
+  mesh.quaternion.setFromUnitVectors(UP, v.normalize());
+  mesh.scale.set(1, len, 1);
+}
+function updateDebug() {
+  debugGroup.visible = debugHit;
+  if (!debugHit) return;
+  segToMesh(dbgBlade, curBase, curTip);
+  for (const d of dbgParts) {
+    const a = d.p.a.clone().applyMatrix4(d.p.mesh.matrixWorld);
+    const b = d.p.b.clone().applyMatrix4(d.p.mesh.matrixWorld);
+    d.m.position.copy(a).add(b).multiplyScalar(0.5);
+    d.m.quaternion.setFromUnitVectors(UP, b.clone().sub(a).normalize());
+  }
+  dbgEnemyBlade.visible = game.mode === 'duel';
+  if (game.mode === 'duel') segToMesh(dbgEnemyBlade, enemy.base, enemy.tip);
+}
+
+// ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 const clock = new THREE.Clock();
@@ -1288,19 +1579,28 @@ const _mq = new THREE.Quaternion();
 const _rel = new THREE.Quaternion();
 const bladeVel = new THREE.Vector3();
 
-function updateSwordOrientation() {
+function updateSwordOrientation(dt) {
   if (input.mode === 'mouse') {
     input.mYaw += (input.mYawT - input.mYaw) * 0.25;
     input.mPitch += (input.mPitchT - input.mPitch) * 0.25;
-    const thrust = input.mThrust || 0;
-    input.mThrust = Math.max(0, thrust - 0.03);
-    _mq.setFromEuler(new THREE.Euler(input.mPitch - 0.42 - thrust, input.mYaw, 0, 'YXZ'));
+    _mq.setFromEuler(new THREE.Euler(input.mPitch - 0.42, input.mYaw, 0, 'YXZ'));
     sword.quaternion.copy(_mq);
   } else {
     _rel.copy(input.refInv).multiply(input.rawQ);
     sword.quaternion.copy(_rel).multiply(mountQ);
   }
   sword.position.copy(handAnchor);
+
+  // stab lunge — thrust the blade toward the dummy (-z) and back
+  if (stab.active) {
+    stab.t += dt;
+    if (stab.t >= stab.dur) stab.active = false;
+    else {
+      const lunge = Math.sin((stab.t / stab.dur) * Math.PI) * 0.5;
+      sword.position.z -= lunge;
+      sword.position.y += lunge * 0.04;
+    }
+  }
 }
 
 function updateDummy(dt) {
@@ -1354,10 +1654,12 @@ function checkHits() {
   speedN.textContent = speed.toFixed(1);
   powerFill.style.width = Math.min(100, speed * 8) + '%';
   setWhoosh(speed);
+  detectSwing(speed);
   const intensity = THREE.MathUtils.clamp((speed - 1.5) / 8, 0, 1);
   trail.push(curTrailInner, curTip, intensity);
 
   if (speed < CFG.hitSpeedMin) return;
+  if (game.mode === 'drones') return; // drones are the only targets in that mode
 
   const power = Math.min(100, speed * 8.5);
   const dir = bladeVel.clone().normalize();
@@ -1401,7 +1703,7 @@ function animate() {
   const dt = Math.min(0.05, clock.getDelta());
   animTime += dt;
 
-  updateSwordOrientation();
+  updateSwordOrientation(dt);
 
   curBase.copy(BLADE_BASE_LOCAL).applyQuaternion(sword.quaternion).add(sword.position);
   curTip.copy(BLADE_TIP_LOCAL).applyQuaternion(sword.quaternion).add(sword.position);
@@ -1422,6 +1724,7 @@ function animate() {
   updateDummy(dt);
   updateRush(dt);
   if (game.mode === 'duel') updateDuel(dt);
+  if (game.mode === 'drones') updateDrones(dt);
   updateSparks(dt);
 
   // fire blade continuously sheds embers along its length
@@ -1432,6 +1735,8 @@ function animate() {
   }
   updateEmbers(dt);
   updateIceShards(dt);
+  updateComboFx(dt);
+  updateDebug();
   impactLight.intensity *= 0.86;
 
   // brazier flicker
@@ -1486,6 +1791,7 @@ function setupNetworked() {
     onMessage: (msg) => {
       if (msg.t === 'imu') applyIMU(msg);
       else if (msg.t === 'calibrate') calibrate();
+      else if (msg.t === 'stab') triggerStab();
       else if (msg.t === 'presence' && msg.role === 'controller') setPair(msg.count > 0);
     },
   });
@@ -1494,10 +1800,11 @@ function setupNetworked() {
 // ---------------------------------------------------------------------------
 // Mode + skin selection (start overlay)
 // ---------------------------------------------------------------------------
+const MODE_TITLE = { duel: 'DUEL', rush: 'TARGET RUSH', drones: 'DRONE SLAYER', free: 'SWING TO STRIKE' };
 function selectMode(m) {
   game.mode = m;
   document.querySelectorAll('.mode-opt').forEach((el) => el.classList.toggle('sel', el.dataset.mode === m));
-  bannerTitle.textContent = m === 'duel' ? 'DUEL' : m === 'rush' ? 'TARGET RUSH' : 'SWING TO STRIKE';
+  bannerTitle.textContent = MODE_TITLE[m] || 'SWING TO STRIKE';
 }
 function selectSkin(id) {
   applySkin(id);
@@ -1514,6 +1821,30 @@ selectMode('free');
 selectSkin('oak');
 selectSword('classic');
 
+// --- Settings / combo-list modal + debug toggle ----------------------------
+const settingsModal = $('settings');
+const comboListEl = $('comboList');
+function populateCombos() {
+  if (!comboListEl) return;
+  comboListEl.innerHTML = '';
+  for (const c of COMBOS) {
+    const row = document.createElement('div');
+    row.className = 'combo-row';
+    row.innerHTML = `<span class="dot-c" style="background:${c.color}"></span><span class="nm">${c.name}</span><span class="keys">${c.keys}</span>`;
+    comboListEl.appendChild(row);
+  }
+}
+populateCombos();
+function openSettings() { if (settingsModal) settingsModal.classList.add('show'); }
+function closeSettings() { if (settingsModal) settingsModal.classList.remove('show'); }
+const gearBtn = $('gearBtn'), recalBtn = $('recalBtn'), combosBtn = $('combosBtn'), settingsClose = $('settingsClose'), dbgToggle = $('dbgToggle');
+if (gearBtn) gearBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); openSettings(); });
+if (combosBtn) combosBtn.addEventListener('click', openSettings);
+if (settingsClose) settingsClose.addEventListener('click', closeSettings);
+if (settingsModal) settingsModal.addEventListener('pointerdown', (e) => { e.stopPropagation(); if (e.target === settingsModal) closeSettings(); });
+if (recalBtn) recalBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); calibrate(); });
+if (dbgToggle) dbgToggle.addEventListener('change', () => { debugHit = dbgToggle.checked; });
+
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
@@ -1526,27 +1857,47 @@ function enterArena() {
   scoreN.textContent = '0';
 
   const isDuel = game.mode === 'duel';
-  if (duelHud) duelHud.style.display = isDuel ? 'block' : 'none';
-  targetCard.style.display = isDuel ? 'none' : 'block';
+  const isDrones = game.mode === 'drones';
+  // HUD panels
+  if (duelHud) duelHud.style.display = (isDuel || isDrones) ? 'block' : 'none';
+  if (duelHud) duelHud.classList.toggle('drones', isDrones); // hides enemy bar / block prompt via CSS
+  targetCard.style.display = (isDuel || isDrones) ? 'none' : 'block';
+  // camera framing (duel is closer)
   if (isDuel) { camBase.set(0, 1.58, 1.5); camLookAt.set(0, 1.25, 0); }
   else { camBase.copy(CFG.camPos); camLookAt.copy(CFG.camLook); }
+  // dummy + arm rig visibility
+  dummyRoot.visible = !isDrones;              // no dummy in drone mode
+  enemyArmStatic.visible = !isDuel;
+  enemyArmRig.visible = isDuel;
+  enemyHandMesh.visible = isDuel;
+  enemySword.visible = isDuel;
+
+  const droneRow = $('droneRow');
+  if (droneRow) droneRow.style.display = isDrones ? 'block' : 'none';
+  const recal = $('recalBtn');
+  if (recal) recal.style.display = LOCAL_MODE ? 'block' : 'none';
 
   updateTargetCard();
   setHint(defaultHint());
-  bannerTitle.textContent = isDuel ? 'DUEL' : game.mode === 'rush' ? 'TARGET RUSH' : 'SWING TO STRIKE';
+  bannerTitle.textContent = MODE_TITLE[game.mode] || 'SWING TO STRIKE';
   if (game.mode === 'rush') spawnRushTarget(); else clearRushTarget();
-  if (isDuel) startDuel(); else enemySword.visible = false;
+  if (isDuel) startDuel();
+  if (isDrones) startDrones();
 }
 
-// Tap to start a fresh duel once one is over.
-window.addEventListener('pointerdown', () => {
-  if (game.mode === 'duel' && game.duelOver && game.running) startDuel();
+// A tap is a stab attack — unless a round is over, when it restarts.
+function onTap() {
+  if (!game.running) return;
+  if (game.mode === 'duel' && game.duelOver) { startDuel(); return; }
+  if (game.mode === 'drones' && game.dronesOver) { startDrones(); return; }
+  triggerStab();
+}
+window.addEventListener('pointerdown', (e) => {
+  if (e.target && e.target.closest && e.target.closest('.hud-btn')) return; // ignore HUD buttons
+  onTap();
 });
 
-// --- Zoom: on-screen buttons (universal), mouse wheel, and pinch ------------
-const zoomInBtn = $('zoomIn'), zoomOutBtn = $('zoomOut');
-if (zoomInBtn) zoomInBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); setZoom(zoomLevel * 0.85); });
-if (zoomOutBtn) zoomOutBtn.addEventListener('pointerdown', (e) => { e.stopPropagation(); setZoom(zoomLevel * 1.18); });
+// --- Zoom: two-finger pinch (mobile) + mouse wheel (desktop) ----------------
 window.addEventListener('wheel', (e) => { setZoom(zoomLevel * (e.deltaY > 0 ? 1.08 : 0.925)); }, { passive: true });
 let pinchDist = 0;
 window.addEventListener('touchmove', (e) => {
@@ -1589,4 +1940,9 @@ if (LOCAL_MODE) {
   setupNetworked();
 }
 
-window.iSword = { sword, dummy, game, input, calibrate, selectMode, selectSkin, selectSword, setSwordSkin, spawnRushTarget, enemy, startDuel };
+window.iSword = {
+  sword, dummy, game, input, calibrate, selectMode, selectSkin, selectSword, setSwordSkin,
+  spawnRushTarget, enemy, startDuel, triggerStab, triggerCombo, recordSwing, COMBOS,
+  drones, spawnDrone, killDrone, startDrones, enemyArmRig, enemyHandMesh,
+  setDebug: (v) => { debugHit = v; debugGroup.visible = v; },
+};

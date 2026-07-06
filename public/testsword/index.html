@@ -6,14 +6,13 @@
   <title>iSword — Control Lab</title>
   <link rel="icon" href="../favicon.svg" />
   <style>
-    :root { --gold:#ffcf6a; --accent:#5cc8ff; --ink:#07090f; --panel:rgba(14,16,24,.82); --line:rgba(140,160,220,.22); }
+    :root { --gold:#ffcf6a; --accent:#5cc8ff; --panel:rgba(14,16,24,.86); --line:rgba(140,160,220,.22); }
     * { box-sizing:border-box; margin:0; padding:0; }
     html,body { height:100%; overflow:hidden; background:#07090f; color:#eef1ff;
       font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
     #app { position:fixed; inset:0; }
     canvas { display:block; width:100%; height:100%; touch-action:none; }
 
-    /* top bar */
     .top { position:fixed; top:0; left:0; right:0; z-index:10; display:flex; align-items:center; gap:12px;
       padding:10px 14px; background:linear-gradient(#07090fcc,#07090f00); pointer-events:none; }
     .top .brand { font-weight:800; letter-spacing:1px; font-size:16px; }
@@ -22,29 +21,33 @@
     .top a { pointer-events:auto; margin-left:auto; color:var(--accent); font-size:12px; text-decoration:none;
       border:1px solid var(--line); padding:6px 10px; border-radius:9px; }
 
-    /* mode chips */
     .modes { position:fixed; top:44px; left:0; right:0; z-index:10; display:flex; gap:8px; padding:8px 14px;
       overflow-x:auto; -webkit-overflow-scrolling:touch; }
     .chip { flex:0 0 auto; cursor:pointer; border:1px solid var(--line); background:rgba(20,24,40,.7);
       color:#cdd3e0; padding:8px 13px; border-radius:999px; font-size:13px; font-weight:600; white-space:nowrap; }
     .chip.sel { border-color:var(--gold); color:var(--gold); box-shadow:0 0 16px rgba(255,207,106,.2); }
 
-    /* right control panel */
-    .panel { position:fixed; top:92px; right:12px; width:min(300px,84vw); z-index:10;
+    .panel { position:fixed; top:92px; right:12px; width:min(300px,86vw); z-index:10;
       background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px;
-      backdrop-filter:blur(10px); max-height:calc(100% - 190px); overflow-y:auto; }
+      backdrop-filter:blur(10px); max-height:calc(100% - 180px); overflow-y:auto; -webkit-overflow-scrolling:touch; }
     .panel.hidden { display:none; }
     .panel h3 { font-size:13px; letter-spacing:2px; color:var(--gold); margin-bottom:4px; }
-    .panel .desc { font-size:12px; color:#9aa3b8; line-height:1.5; margin-bottom:12px; }
-    .row { margin:10px 0; }
+    .panel .desc { font-size:12px; color:#9aa3b8; line-height:1.5; margin-bottom:10px; }
+    .sec { margin-top:12px; border-top:1px solid var(--line); padding-top:10px; }
+    .sec .h { font-size:11px; letter-spacing:2px; color:#8b93b8; margin-bottom:8px; }
+    .row { margin:9px 0; }
     .row label { display:flex; justify-content:space-between; font-size:12.5px; color:#cdd3e0; margin-bottom:5px; }
     .row label b { color:var(--gold); font-variant-numeric:tabular-nums; }
     input[type=range]{ width:100%; accent-color:var(--gold); }
-    .tele { margin-top:12px; border-top:1px solid var(--line); padding-top:10px; font-size:12px; }
-    .tele .t { display:flex; justify-content:space-between; color:#9aa3b8; padding:2px 0; }
+    .toggle { display:flex; align-items:center; justify-content:space-between; font-size:13px; color:#cdd3e0; padding:6px 0; cursor:pointer; }
+    .toggle input { width:40px; height:22px; }
+    .segbtns { display:flex; gap:6px; }
+    .segbtns button { flex:1; border:1px solid var(--line); background:rgba(20,24,40,.7); color:#cdd3e0;
+      border-radius:9px; padding:8px; font-size:12px; font-weight:700; cursor:pointer; }
+    .segbtns button.sel { border-color:var(--gold); color:var(--gold); }
+    .tele .t { display:flex; justify-content:space-between; color:#9aa3b8; padding:2px 0; font-size:12px; }
     .tele .t b { color:#eef1ff; font-variant-numeric:tabular-nums; }
 
-    /* bottom controls */
     .bottom { position:fixed; bottom:0; left:0; right:0; z-index:10; display:flex; gap:8px; justify-content:center; flex-wrap:wrap;
       padding:12px 14px calc(12px + env(safe-area-inset-bottom)); background:linear-gradient(#07090f00,#07090fcc); }
     .btn { pointer-events:auto; cursor:pointer; border:none; border-radius:12px; font-weight:800; font-size:14px;
@@ -54,9 +57,7 @@
     .btn:active { transform:scale(.96); }
     .score { position:fixed; top:92px; left:14px; z-index:10; font-size:12px; color:#9aa3b8; }
     .score b { color:var(--gold); font-size:20px; }
-
-    .hint { position:fixed; bottom:70px; left:0; right:0; text-align:center; color:#8b93b8; font-size:12px; z-index:9; }
-    .panelToggle { position:fixed; top:92px; right:12px; z-index:11; display:none; }
+    .hint { position:fixed; bottom:74px; left:0; right:0; text-align:center; color:#8b93b8; font-size:12px; z-index:9; pointer-events:none; }
   </style>
   <script type="importmap">
   { "imports": { "three": "../vendor/three.module.js", "three/addons/": "../vendor/three/addons/" } }
@@ -68,20 +69,38 @@
   <div class="top">
     <div>
       <div class="brand">i<b>Sword</b> · Control Lab</div>
-      <div class="tag">test different sword control mechanisms</div>
+      <div class="tag">mechanics test-ground</div>
     </div>
     <a href="../">← main game</a>
   </div>
 
   <div class="modes" id="modes"></div>
-
-  <div class="score">slashed <b id="score">0</b><br/><span id="hits2" style="color:#6b7392"></span></div>
+  <div class="score">score <b id="score">0</b></div>
 
   <div class="panel" id="panel">
     <h3 id="modeName">ABSOLUTE</h3>
     <div class="desc" id="modeDesc"></div>
     <div id="sliders"></div>
-    <div class="tele">
+
+    <div class="sec">
+      <div class="h">SCENE</div>
+      <label class="toggle">Moving orbs <input type="checkbox" id="optMove"></label>
+      <label class="toggle">Show reach sphere <input type="checkbox" id="optReach"></label>
+      <label class="toggle">Show hitboxes <input type="checkbox" id="optHit"></label>
+      <label class="toggle">Add dummy <input type="checkbox" id="optDummy"></label>
+      <label class="toggle">Add 2nd sword <input type="checkbox" id="optEnemy"></label>
+      <div class="row"><label>Hitbox size <b id="vHit">1.0×</b></label><input type="range" id="hitScale" min="0.5" max="3" step="0.05" value="1"></div>
+    </div>
+
+    <div class="sec">
+      <div class="h">GRAPHICS</div>
+      <div class="segbtns" id="qbtns">
+        <button data-q="low">Low</button><button data-q="med">Med</button><button data-q="high" class="sel">High</button>
+      </div>
+    </div>
+
+    <div class="sec tele">
+      <div class="h">TELEMETRY</div>
       <div class="t">input <b id="tInput">—</b></div>
       <div class="t">yaw / pitch / roll <b id="tYPR">0 / 0 / 0</b></div>
       <div class="t">angular speed <b id="tAng">0°/s</b></div>
@@ -90,7 +109,7 @@
     </div>
   </div>
 
-  <div class="hint" id="hint">Tap “Enable Motion” on a phone, or move the mouse. Slash the orbs to feel each control scheme.</div>
+  <div class="hint" id="hint">Tap “Enable Motion” on a phone, or move the mouse. Slash orbs · toggle a dummy / 2nd sword in the panel.</div>
 
   <div class="bottom">
     <button class="btn gold" id="enableBtn">Enable Motion</button>
@@ -102,301 +121,350 @@
   <script type="module">
     import * as THREE from 'three';
     import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-
     const $ = (id) => document.getElementById(id);
+    const V = THREE.Vector3, Q = THREE.Quaternion;
+
+    // =====================================================================
+    // Architecture: a small registry-driven sandbox so we can later swap in
+    // different sword DESIGNS and dial graphics up/down via QUALITY presets,
+    // then reuse the same mechanics (input → sword pose → collision → FX) in
+    // the main game.
+    // =====================================================================
+    const CONFIG = {
+      hand: new V(0.12, 1.15, 0.95),   // player grip anchor
+      grip: 0.135, bladeLen: 0.9,
+      bladeR: 0.05,                    // base blade collision radius
+      get reach() { return CONFIG.grip + CONFIG.bladeLen; },
+    };
+    const QUALITY = {
+      low:  { pr:1,   shadows:false, env:false, sparks:70,  trail:0,  seg:8,  fog:[6,16] },
+      med:  { pr:1.5, shadows:false, env:true,  sparks:180, trail:14, seg:16, fog:[6,20] },
+      high: { pr:2,   shadows:true,  env:true,  sparks:320, trail:16, seg:24, fog:[7,22] },
+    };
+    // Sword designs — add entries later; each returns geometry/material params.
+    const SWORD_DESIGNS = {
+      classic: { blade:0xeaf2ff, guard:0xd9a441, grip:0x3a2417, glow:0x5cc8ff },
+      rival:   { blade:0xc6ccd6, guard:0x7a4a24, grip:0x2a1414, glow:0xff5c5c },
+    };
+
+    const opts = { move:false, reach:false, hit:false, dummy:false, enemy:false, hitScale:1, quality:'high' };
 
     // ---- renderer / scene ----
     const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    renderer.setSize(innerWidth, innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     $('app').appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0d16);
-    scene.fog = new THREE.Fog(0x0a0d16, 6, 20);
+    scene.fog = new THREE.Fog(0x0a0d16, 7, 22);
     const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.05, 100);
-    const camLook = new THREE.Vector3(0, 1.25, 0);
-    const camBase = new THREE.Vector3(0, 1.55, 2.0);
-    let zoom = 1; // <1 closer, >1 farther
-    const setZoom = (z)=> zoom = THREE.MathUtils.clamp(z, 0.5, 2.2);
-    camera.position.copy(camBase); camera.lookAt(camLook);
-    // pinch (mobile) + wheel (desktop)
-    let pinchD = 0;
-    addEventListener('touchmove', (e)=>{ if(e.touches.length===2){
-      const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
-      if(pinchD) setZoom(zoom*(pinchD/d)); pinchD=d; } }, {passive:true});
-    addEventListener('touchend', ()=>{ pinchD=0; });
-    addEventListener('wheel', (e)=>setZoom(zoom*(e.deltaY>0?1.08:0.925)), {passive:true});
+    const camLook = new V(0, 1.25, 0), camBase = new V(0, 1.55, 2.0), _camDir = new V();
+    let zoom = 1; const setZoom = (z)=> zoom = THREE.MathUtils.clamp(z, 0.5, 2.4);
 
     const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.add(new THREE.HemisphereLight(0x9fb8ff, 0x161018, 0.6));
-    const key = new THREE.DirectionalLight(0xffe6c0, 2.2); key.position.set(3,6,4); scene.add(key);
-    const rim = new THREE.DirectionalLight(0x4a90ff, 1.0); rim.position.set(-4,3,-3); scene.add(rim);
+    const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.add(new THREE.HemisphereLight(0x9fb8ff, 0x161018, 0.55));
+    const key = new THREE.DirectionalLight(0xffe6c0, 2.2); key.position.set(3,6,4);
+    key.shadow.mapSize.set(1024,1024); key.shadow.camera.far=20; key.shadow.bias=-0.0005; scene.add(key);
+    { const rim=new THREE.DirectionalLight(0x4a90ff,1.0); rim.position.set(-4,3,-3); scene.add(rim); }
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(14,48), new THREE.MeshStandardMaterial({color:0x121728,roughness:0.9,metalness:0.1}));
+    floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
+    const grid = new THREE.GridHelper(20,20,0x2a3350,0x151a2c); scene.add(grid);
 
-    // floor grid
-    const grid = new THREE.GridHelper(24, 24, 0x2a3350, 0x151a2c);
-    grid.position.y = 0; scene.add(grid);
+    function applyQuality(q){
+      opts.quality=q; const c=QUALITY[q];
+      renderer.setPixelRatio(Math.min(devicePixelRatio, c.pr));
+      renderer.shadowMap.enabled=c.shadows; key.castShadow=c.shadows;
+      scene.environment = c.env ? envTex : null;
+      scene.fog.near=c.fog[0]; scene.fog.far=c.fog[1];
+      renderer.shadowMap.needsUpdate=true;
+      scene.traverse(o=>{ if(o.isMesh && o.material){ o.material.needsUpdate=true; } });
+      document.querySelectorAll('#qbtns button').forEach(b=>b.classList.toggle('sel', b.dataset.q===q));
+      onResize();
+    }
+    function onResize(){ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); }
+    addEventListener('resize', onResize);
 
-    // ---- sword ----
-    const BLADE_LEN = 0.9, GRIP = 0.135;
-    const sword = new THREE.Group();
-    const handAnchor = new THREE.Vector3(0.12, 1.15, 0.95);
-    sword.position.copy(handAnchor);
-    scene.add(sword);
-    const bladeMat = new THREE.MeshStandardMaterial({ color:0xeaf2ff, metalness:1, roughness:0.16, envMapIntensity:1.4 });
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, BLADE_LEN*0.82, 0.012), bladeMat);
-    blade.position.y = GRIP + BLADE_LEN*0.41; sword.add(blade);
-    const tipMesh = new THREE.Mesh(new THREE.ConeGeometry(0.025, BLADE_LEN*0.18, 4), bladeMat);
-    tipMesh.position.y = GRIP + BLADE_LEN*0.82 + BLADE_LEN*0.09; tipMesh.rotation.y = Math.PI/4; tipMesh.scale.z = 0.28; sword.add(tipMesh);
-    sword.add(new THREE.Mesh(new THREE.BoxGeometry(0.19,0.028,0.05), new THREE.MeshStandardMaterial({color:0xd9a441,metalness:1,roughness:0.35})));
-    const guard = sword.children[sword.children.length-1]; guard.position.y = GRIP;
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.017,0.019,GRIP,16), new THREE.MeshStandardMaterial({color:0x3a2417,roughness:0.9})); grip.position.y = GRIP/2; sword.add(grip);
-    const glow = new THREE.PointLight(0x5cc8ff, 0, 3, 2); glow.position.y = GRIP + BLADE_LEN*0.7; sword.add(glow);
+    // ---- sword factory ----
+    function buildSword(designId){
+      const d = SWORD_DESIGNS[designId] || SWORD_DESIGNS.classic;
+      const g = new THREE.Group();
+      const L=CONFIG.bladeLen, GR=CONFIG.grip;
+      const bm = new THREE.MeshStandardMaterial({ color:d.blade, metalness:1, roughness:0.16, envMapIntensity:1.4 });
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05,L*0.82,0.012), bm); blade.position.y=GR+L*0.41; blade.castShadow=true; g.add(blade);
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.025,L*0.18,4), bm); tip.position.y=GR+L*0.82+L*0.09; tip.rotation.y=Math.PI/4; tip.scale.z=0.28; tip.castShadow=true; g.add(tip);
+      const guard = new THREE.Mesh(new THREE.BoxGeometry(0.19,0.028,0.05), new THREE.MeshStandardMaterial({color:d.guard,metalness:1,roughness:0.35})); guard.position.y=GR; guard.castShadow=true; g.add(guard);
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.017,0.019,GR,16), new THREE.MeshStandardMaterial({color:d.grip,roughness:0.9})); grip.position.y=GR/2; g.add(grip);
+      const glow = new THREE.PointLight(d.glow, 0, 3, 2); glow.position.y=GR+L*0.7; g.add(glow);
+      g.userData = { glow, TIP:new V(0,GR+L,0), BASE:new V(0,GR,0), MID:new V(0,GR+L*0.62,0) };
+      return g;
+    }
+    const _tmpv = new V();
+    function CONFIG_TIP(sword){ return sword.userData.TIP.clone().applyQuaternion(sword.quaternion).add(sword.position); }
+    function CONFIG_BASE(sword){ return sword.userData.BASE.clone().applyQuaternion(sword.quaternion).add(sword.position); }
 
-    const mountQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.42,0,0,'XYZ'));
-    const BLADE_BASE = new THREE.Vector3(0, GRIP, 0);
-    const BLADE_TIP = new THREE.Vector3(0, GRIP + BLADE_LEN, 0);
+    const sword = buildSword('classic');
+    sword.position.copy(CONFIG.hand); scene.add(sword);
+    const mountQ = new Q().setFromEuler(new THREE.Euler(-0.42,0,0,'XYZ'));
 
-    // trail
-    const trailGeo = new THREE.BufferGeometry();
-    const TN = 16; const tpos = new Float32Array(TN*2*3);
-    trailGeo.setAttribute('position', new THREE.BufferAttribute(tpos,3));
-    const tidx=[]; for(let i=0;i<TN-1;i++){const o=i*2; tidx.push(o,o+1,o+2,o+2,o+1,o+3);} trailGeo.setIndex(tidx);
-    const trail = new THREE.Mesh(trailGeo, new THREE.MeshBasicMaterial({color:0x9fd8ff, transparent:true, opacity:0.32, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false}));
-    trail.frustumCulled=false; scene.add(trail);
-    const trailSamples=[];
-    function pushTrail(base,tip,i){ trailSamples.push({base:base.clone(),tip:tip.clone(),i}); if(trailSamples.length>TN)trailSamples.shift();
-      for(let k=0;k<TN;k++){ const s=trailSamples[Math.min(k,trailSamples.length-1)]||trailSamples[0]; const o=k*6; if(!s){tpos[o+1]=-100;tpos[o+4]=-100;continue;}
-        tpos[o]=s.base.x;tpos[o+1]=s.base.y;tpos[o+2]=s.base.z; tpos[o+3]=s.tip.x;tpos[o+4]=s.tip.y;tpos[o+5]=s.tip.z; }
-      trailGeo.attributes.position.needsUpdate=true; }
+    // ---- FX: sparks (quality-scaled pool) + sounds ----
+    const sparkTex = (()=>{ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d');
+      const gr=x.createRadialGradient(32,32,0,32,32,32); gr.addColorStop(0,'#fff'); gr.addColorStop(.35,'rgba(255,240,200,.9)'); gr.addColorStop(1,'rgba(255,150,60,0)');
+      x.fillStyle=gr; x.fillRect(0,0,64,64); return new THREE.CanvasTexture(c); })();
+    const MAXP=340; const pPos=new Float32Array(MAXP*3), pCol=new Float32Array(MAXP*3);
+    const pGeo=new THREE.BufferGeometry(); pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3)); pGeo.setAttribute('color',new THREE.BufferAttribute(pCol,3));
+    const points=new THREE.Points(pGeo, new THREE.PointsMaterial({size:0.13,map:sparkTex,transparent:true,blending:THREE.AdditiveBlending,depthWrite:false,vertexColors:true,sizeAttenuation:true}));
+    points.frustumCulled=false; scene.add(points); const sparks=[]; for(let i=0;i<MAXP;i++)pPos[i*3+1]=-1000;
+    const _col=new THREE.Color();
+    function burst(pos,dir,power,color,spread=3){ const budget=QUALITY[opts.quality].sparks; const n=Math.min(budget-sparks.length, Math.round(8+power*0.25)); _col.set(color);
+      for(let i=0;i<n;i++){ if(sparks.length>=budget)break; const v=dir.clone().multiplyScalar(1.2+Math.random()*3*(power/60));
+        v.x+=(Math.random()-.5)*spread; v.y+=(Math.random()-.5)*spread+1; v.z+=(Math.random()-.5)*spread;
+        sparks.push({p:pos.clone(),v,life:0,max:.3+Math.random()*.35,r:_col.r,g:_col.g,b:_col.b}); } }
+    function updateSparks(dt){ for(let i=sparks.length-1;i>=0;i--){ const s=sparks[i]; s.life+=dt; if(s.life>=s.max){sparks.splice(i,1);continue;} s.v.y-=9.8*dt; s.p.addScaledVector(s.v,dt); }
+      for(let i=0;i<MAXP;i++){ if(i<sparks.length){ const s=sparks[i],k=1-s.life/s.max; pPos[i*3]=s.p.x;pPos[i*3+1]=s.p.y;pPos[i*3+2]=s.p.z; pCol[i*3]=s.r*k;pCol[i*3+1]=s.g*k;pCol[i*3+2]=s.b*k; } else pPos[i*3+1]=-1000; }
+      pGeo.attributes.position.needsUpdate=true; pGeo.attributes.color.needsUpdate=true; }
+    const flashLight = new THREE.PointLight(0xfff0c0,0,5,2); scene.add(flashLight);
 
-    // ---- targets ----
-    const targets=[];
-    const tGeo=new THREE.SphereGeometry(0.12,16,12);
-    for(let i=0;i<5;i++){ const m=new THREE.Mesh(tGeo, new THREE.MeshStandardMaterial({color:0x5ce08a, emissive:0x1c7a3a, emissiveIntensity:1.4, metalness:0.2, roughness:0.4}));
-      scene.add(m); targets.push({mesh:m, alive:true}); placeTarget(targets[i]); }
-    function placeTarget(t){ t.mesh.position.set((Math.random()-0.5)*1.6, 0.9+Math.random()*1.1, -0.1+Math.random()*0.5); t.mesh.visible=true; t.alive=true; t.mesh.scale.setScalar(1); }
-    let score=0;
+    let audio=null; function initAudio(){ if(audio)return; try{ audio=new (window.AudioContext||window.webkitAudioContext)(); }catch{} }
+    function noise(d){ const n=audio.sampleRate*d|0, b=audio.createBuffer(1,n,audio.sampleRate), o=b.getChannelData(0); for(let i=0;i<n;i++)o[i]=Math.random()*2-1; return b; }
+    function playHit(power,metal){ if(!audio)return; const t=audio.currentTime, g=audio.createGain(); const vol=Math.min(.8,.2+power/140);
+      g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(.001,t+.3); g.connect(audio.destination);
+      const o=audio.createOscillator(); o.type='sine'; o.frequency.setValueAtTime(metal?680:170,t); o.frequency.exponentialRampToValueAtTime(metal?220:70,t+.22); o.connect(g); o.start(t); o.stop(t+.3);
+      const s=audio.createBufferSource(); s.buffer=noise(.16); const bp=audio.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=metal?3600:900; const ng=audio.createGain(); ng.gain.setValueAtTime(vol*.8,t); ng.gain.exponentialRampToValueAtTime(.001,t+.12); s.connect(bp); bp.connect(ng); ng.connect(audio.destination); s.start(t); s.stop(t+.16); }
 
-    // ---- collision (segment-segment) ----
-    const _d1=new THREE.Vector3(),_d2=new THREE.Vector3(),_r=new THREE.Vector3(),_c1=new THREE.Vector3(),_c2=new THREE.Vector3();
-    function segDist(p1,q1,p2,q2){ _d1.subVectors(q1,p1);_d2.subVectors(q2,p2);_r.subVectors(p1,p2);
-      const a=_d1.dot(_d1),e=_d2.dot(_d2),f=_d2.dot(_r); let s,t; const EPS=1e-8;
-      if(a<=EPS&&e<=EPS){s=0;t=0;} else if(a<=EPS){s=0;t=THREE.MathUtils.clamp(f/e,0,1);}
-      else{ const c=_d1.dot(_r); if(e<=EPS){t=0;s=THREE.MathUtils.clamp(-c/a,0,1);}
-        else{ const b=_d1.dot(_d2),den=a*e-b*b; s=den>EPS?THREE.MathUtils.clamp((b*f-c*e)/den,0,1):0; t=(b*s+f)/e;
-          if(t<0){t=0;s=THREE.MathUtils.clamp(-c/a,0,1);} else if(t>1){t=1;s=THREE.MathUtils.clamp((b-c)/a,0,1);} } }
+    // ---- collision helper ----
+    const _d1=new V(),_d2=new V(),_r=new V(),_c1=new V(),_c2=new V();
+    function segDist(p1,q1,p2,q2){ _d1.subVectors(q1,p1);_d2.subVectors(q2,p2);_r.subVectors(p1,p2); const a=_d1.dot(_d1),e=_d2.dot(_d2),f=_d2.dot(_r); let s,t; const E=1e-8;
+      if(a<=E&&e<=E){s=0;t=0;} else if(a<=E){s=0;t=THREE.MathUtils.clamp(f/e,0,1);} else { const c=_d1.dot(_r); if(e<=E){t=0;s=THREE.MathUtils.clamp(-c/a,0,1);} else { const b=_d1.dot(_d2),dn=a*e-b*b; s=dn>E?THREE.MathUtils.clamp((b*f-c*e)/dn,0,1):0; t=(b*s+f)/e; if(t<0){t=0;s=THREE.MathUtils.clamp(-c/a,0,1);} else if(t>1){t=1;s=THREE.MathUtils.clamp((b-c)/a,0,1);} } }
       _c1.copy(p1).addScaledVector(_d1,s); _c2.copy(p2).addScaledVector(_d2,t); return _c1.distanceTo(_c2); }
 
-    // ---- input ----
-    const zee=new THREE.Vector3(0,0,1);
-    const q1=new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
-    const _e=new THREE.Euler();
-    function deviceQ(alpha,beta,gamma,orient,out){ _e.set(beta,alpha,-gamma,'YXZ'); out.setFromEuler(_e);
-      out.multiply(q1); out.multiply(new THREE.Quaternion().setFromAxisAngle(zee,-orient)); return out; }
+    // ---- reach sphere + hitbox debug ----
+    const reachViz = new THREE.Mesh(new THREE.SphereGeometry(CONFIG.reach,24,16), new THREE.MeshBasicMaterial({color:0x5cc8ff,wireframe:true,transparent:true,opacity:0.12}));
+    reachViz.position.copy(CONFIG.hand); reachViz.visible=false; scene.add(reachViz);
+    const dbg = new THREE.Group(); dbg.visible=false; scene.add(dbg);
+    const dbgBladeMat = new THREE.MeshBasicMaterial({color:0x66ccff,wireframe:true});
+    const dbgBlade = new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,8), dbgBladeMat); dbg.add(dbgBlade);
+    const dbgEnemyBlade = new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,8), new THREE.MeshBasicMaterial({color:0xff6688,wireframe:true})); dbg.add(dbgEnemyBlade);
+    const _up=new V(0,1,0);
+    function orientCyl(mesh,a,b,radius){ const v=_tmpv.subVectors(b,a); const len=Math.max(0.001,v.length());
+      mesh.position.copy(a).addScaledVector(v,0.5); mesh.quaternion.setFromUnitVectors(_up, v.clone().normalize()); mesh.scale.set(radius,len,radius); }
 
-    const input = { mode:'idle', rawQ:new THREE.Quaternion(), refInv:new THREE.Quaternion(), hasCalib:false,
-      rate:new THREE.Vector3(), accel:new THREE.Vector3(), mYaw:0, mPitch:0, mYawT:0, mPitchT:0, lastMove:0 };
-    const grav = new THREE.Vector3();
+    // ---- orbs (targets) within reach ----
+    const orbs=[]; const orbGeo=new THREE.SphereGeometry(0.12,16,12);
+    const dbgOrbs=[];
+    for(let i=0;i<6;i++){ const m=new THREE.Mesh(orbGeo,new THREE.MeshStandardMaterial({color:0x5ce08a,emissive:0x1c7a3a,emissiveIntensity:1.4,metalness:.2,roughness:.4}));
+      scene.add(m); const o={mesh:m,r:0.12,alive:true,vel:new V()}; orbs.push(o); placeOrb(o);
+      const w=new THREE.Mesh(new THREE.SphereGeometry(1,12,8),new THREE.MeshBasicMaterial({color:0x00ff88,wireframe:true,transparent:true,opacity:.7})); dbg.add(w); dbgOrbs.push(w); }
+    let score=0;
+    function placeOrb(o){ // random point INSIDE the reach sphere, front-biased, above the floor
+      let p; for(let k=0;k<12;k++){ const dir=new V((Math.random()-.5)*2, (Math.random()-.35)*1.4, -(0.2+Math.random())).normalize();
+        const rad=(0.45+Math.random()*0.5)*CONFIG.reach; p=CONFIG.hand.clone().addScaledVector(dir,rad); if(p.y>0.4) break; }
+      o.mesh.position.copy(p); o.mesh.visible=true; o.alive=true; o.mesh.scale.setScalar(1);
+      const s=0.35; o.vel.set((Math.random()-.5)*s,(Math.random()-.5)*s*0.6,(Math.random()-.5)*s); }
+    function updateOrbs(dt){ for(const o of orbs){ if(!o.alive) continue;
+        if(opts.move){ o.mesh.position.addScaledVector(o.vel,dt); const d=o.mesh.position.distanceTo(CONFIG.hand);
+          if(d>0.96*CONFIG.reach || d<0.4 || o.mesh.position.y<0.4){ _tmpv.subVectors(CONFIG.hand,o.mesh.position).normalize(); o.vel.reflect(_tmpv).multiplyScalar(0.9); o.vel.addScaledVector(_tmpv,0.15); } }
+        o.mesh.rotation.y+=dt*1.4; o.mesh.material.emissiveIntensity=1.2+Math.sin(performance.now()*.005+o.mesh.position.x)*0.4; } }
 
-    function screenAngle(){ const so=(screen.orientation&&screen.orientation.angle)||window.orientation||0; return so*Math.PI/180; }
-    function onOrient(ev){ if(ev.alpha==null&&ev.beta==null&&ev.gamma==null) return;
-      deviceQ((ev.alpha||0)*Math.PI/180,(ev.beta||0)*Math.PI/180,(ev.gamma||0)*Math.PI/180, screenAngle(), input.rawQ);
+    // ---- dummy (optional, jiggly) ----
+    const dummy = new THREE.Group(); dummy.position.set(0,0.35,-0.15); dummy.visible=false; scene.add(dummy);
+    const dwood=new THREE.MeshStandardMaterial({color:0xb0763f,roughness:0.7}), ddark=new THREE.MeshStandardMaterial({color:0x7d5228,roughness:0.75});
+    const dBaseMat=new THREE.MeshStandardMaterial({color:0x20242f,metalness:.4,roughness:.6});
+    { const base=new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.4,0.12,24),dBaseMat); base.position.set(0,-0.29,0); base.castShadow=true; dummy.add(base); }
+    const dbody=new THREE.Group(); dummy.add(dbody);
+    const dtorso=new THREE.Mesh(new THREE.CapsuleGeometry(0.24,0.56,8,18),dwood); dtorso.position.y=0.78; dtorso.castShadow=true; dbody.add(dtorso);
+    const dhead=new THREE.Mesh(new THREE.SphereGeometry(0.16,20,14),dwood); dhead.position.y=1.28; dhead.castShadow=true; dbody.add(dhead);
+    for(const sx of [-1,1]){ const eye=new THREE.Mesh(new THREE.SphereGeometry(0.02,8,6),new THREE.MeshStandardMaterial({color:0x201007})); eye.position.set(0.055*sx,1.32,0.14); dbody.add(eye); }
+    const dstate={leanX:0,leanZ:0,vx:0,vz:0,pulse:0};
+    const dCaps=[ {mesh:dtorso,a:new V(0,-0.28,0),b:new V(0,0.28,0),r:0.26,name:'torso'}, {mesh:dhead,a:new V(0,0,0),b:new V(0,0.02,0),r:0.17,name:'head'} ];
+    const dbgDummy=dCaps.map(()=>{ const m=new THREE.Mesh(new THREE.CylinderGeometry(1,1,1,8),new THREE.MeshBasicMaterial({color:0x00ff88,wireframe:true})); dbg.add(m); return m; });
+    let dummyHits=0;
+    function updateDummy(dt){ const k=46,c=6; dstate.vx+=(-k*dstate.leanX-c*dstate.vx)*dt; dstate.vz+=(-k*dstate.leanZ-c*dstate.vz)*dt;
+      dstate.leanX+=dstate.vx*dt; dstate.leanZ+=dstate.vz*dt; dbody.rotation.set(dstate.leanX,0,dstate.leanZ); dstate.pulse=Math.max(0,dstate.pulse-dt*3); }
+
+    // ---- 2nd sword (optional) — slow AI so you can practice blocking ----
+    const enemy = buildSword('rival'); enemy.visible=false; scene.add(enemy);
+    const enemyHand = new V(-0.16,1.24,0.34); enemy.position.copy(enemyHand);
+    const enemyState={ t:0, clashCd:0 };
+    const eGuard=new Q().setFromEuler(new THREE.Euler(-0.4,-0.2,0.35,'YXZ'));
+    function updateEnemy(dt){ enemyState.t+=dt;
+      // gentle telegraphed sweeps toward the player so blades can meet
+      const sweep = Math.sin(enemyState.t*1.3)*0.7, chop = Math.max(0, Math.sin(enemyState.t*0.5))*0.9;
+      const q = new Q().setFromEuler(new THREE.Euler(1.2*chop-0.3, sweep, -0.2,'YXZ'));
+      enemy.quaternion.slerp(q, 1-Math.pow(0.02,dt));
+      enemyState.clashCd=Math.max(0,enemyState.clashCd-dt);
+      enemy.userData.glow.intensity = 0.6 + Math.sin(enemyState.t*8)*0.3;
+    }
+    function checkClash(pBase,pTip){ if(!enemy.visible) return; if(enemyState.clashCd>0) return;
+      const eB=CONFIG_BASE(enemy), eT=CONFIG_TIP(enemy);
+      const d=segDist(pBase,pTip,eB,eT);
+      if(d < CONFIG.bladeR*opts.hitScale + 0.05){ enemyState.clashCd=0.12;
+        const mid=_c1.clone().lerp(_c2,0.5);
+        burst(mid,new V(0,1,0.2).normalize(),90,0xfff0c0,4.5); burst(mid,new V(0,0.4,1).normalize(),60,0xffd166,3.5);
+        flashLight.color.setHex(0xfff0c0); flashLight.position.copy(mid); flashLight.intensity=4;
+        playHit(90,true); shake=0.1;
+        // knock the enemy blade back a touch
+        enemy.quaternion.slerp(eGuard, 0.4);
+      }
+    }
+
+    // =====================================================================
+    // Input + control modes
+    // =====================================================================
+    const zee=new V(0,0,1), q1=new Q(-Math.sqrt(0.5),0,0,Math.sqrt(0.5)), _e=new THREE.Euler();
+    function deviceQ(al,be,ga,or,out){ _e.set(be,al,-ga,'YXZ'); out.setFromEuler(_e); out.multiply(q1); out.multiply(new Q().setFromAxisAngle(zee,-or)); return out; }
+    const input={ mode:'idle', rawQ:new Q(), refInv:new Q(), hasCalib:false, rate:new V(), accel:new V(), mYaw:0,mPitch:0,mYawT:0,mPitchT:0,lastMove:0 };
+    const grav=new V();
+    const screenAngle=()=>((screen.orientation&&screen.orientation.angle)||window.orientation||0)*Math.PI/180;
+    function onOrient(ev){ if(ev.alpha==null&&ev.beta==null&&ev.gamma==null)return; deviceQ((ev.alpha||0)*Math.PI/180,(ev.beta||0)*Math.PI/180,(ev.gamma||0)*Math.PI/180,screenAngle(),input.rawQ);
       input.mode='sensor'; if(!input.hasCalib){ input.refInv.copy(input.rawQ).invert(); input.hasCalib=true; } }
-    function onMotion(ev){
-      const r=ev.rotationRate; if(r) input.rate.set((r.beta||0)*Math.PI/180,(r.alpha||0)*Math.PI/180,(r.gamma||0)*Math.PI/180);
-      // linear acceleration (gravity removed). iOS gives ev.acceleration; else high-pass ev.accelerationIncludingGravity.
-      const a=ev.acceleration;
-      if(a && a.x!=null){ input.accel.set(a.x||0, a.y||0, a.z||0); }
-      else { const g=ev.accelerationIncludingGravity; if(g){
-        grav.set(grav.x*0.92+(g.x||0)*0.08, grav.y*0.92+(g.y||0)*0.08, grav.z*0.92+(g.z||0)*0.08);
-        input.accel.set((g.x||0)-grav.x, (g.y||0)-grav.y, (g.z||0)-grav.z); } }
-    }
-
-    async function enableMotion(){
-      const needO=typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function';
-      const needM=typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function';
-      try{ if(needO){const r=await DeviceOrientationEvent.requestPermission(); if(r!=='granted') throw 0;}
-           if(needM){await DeviceMotionEvent.requestPermission();} }catch{ $('hint').textContent='Motion blocked — use the mouse instead.'; }
-      addEventListener('deviceorientation', onOrient, true);
-      addEventListener('devicemotion', onMotion, true);
-      $('hint').textContent='Calibrate with the blade pointing up, then swing!';
-    }
-    // mouse
-    addEventListener('pointermove',(e)=>{ if(e.pointerType==='touch') return; const nx=e.clientX/innerWidth*2-1, ny=e.clientY/innerHeight*2-1;
-      const now=performance.now(); const dt=Math.max(1,now-input.lastMove); input.lastMove=now;
-      const nyaw=-nx*1.4, npitch=-ny*1.3;
-      input.rate.set((npitch-input.mPitchT)/dt*1000,(nyaw-input.mYawT)/dt*1000,0);
-      input.mYawT=nyaw; input.mPitchT=npitch; if(input.mode==='idle') input.mode='mouse'; });
-
+    function onMotion(ev){ const r=ev.rotationRate; if(r) input.rate.set((r.beta||0)*Math.PI/180,(r.alpha||0)*Math.PI/180,(r.gamma||0)*Math.PI/180);
+      const a=ev.acceleration; if(a&&a.x!=null){ input.accel.set(a.x||0,a.y||0,a.z||0); } else { const g=ev.accelerationIncludingGravity; if(g){ grav.set(grav.x*.92+(g.x||0)*.08,grav.y*.92+(g.y||0)*.08,grav.z*.92+(g.z||0)*.08); input.accel.set((g.x||0)-grav.x,(g.y||0)-grav.y,(g.z||0)-grav.z); } } }
+    async function enableMotion(){ initAudio();
+      const nO=typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function';
+      const nM=typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function';
+      try{ if(nO){const r=await DeviceOrientationEvent.requestPermission(); if(r!=='granted')throw 0;} if(nM){await DeviceMotionEvent.requestPermission();} }catch{ $('hint').textContent='Motion blocked — use the mouse.'; }
+      addEventListener('deviceorientation',onOrient,true); addEventListener('devicemotion',onMotion,true); $('hint').textContent='Calibrate blade-up, then swing!'; }
+    addEventListener('pointermove',(e)=>{ if(e.pointerType==='touch')return; const nx=e.clientX/innerWidth*2-1, ny=e.clientY/innerHeight*2-1;
+      const now=performance.now(), dt=Math.max(1,now-input.lastMove); input.lastMove=now; const ny2=-nx*1.4, np=-ny*1.3;
+      input.rate.set((np-input.mPitchT)/dt*1000,(ny2-input.mYawT)/dt*1000,0); input.mYawT=ny2; input.mPitchT=np; if(input.mode==='idle')input.mode='mouse'; });
     function calibrate(){ input.refInv.copy(input.rawQ).invert(); input.hasCalib=true; $('hint').textContent='Calibrated — swing!'; }
+    // pinch + wheel zoom
+    let pinchD=0;
+    addEventListener('touchmove',(e)=>{ if(e.touches.length===2){ const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); if(pinchD)setZoom(zoom*(pinchD/d)); pinchD=d; } },{passive:true});
+    addEventListener('touchend',()=>pinchD=0);
+    addEventListener('wheel',(e)=>setZoom(zoom*(e.deltaY>0?1.08:0.925)),{passive:true});
 
-    // ---- control modes ----
-    const PARAMS = {
-      smoothing:{label:'Smoothing (lag)', min:0, max:0.92, step:0.01, val:0.4},
-      sensitivity:{label:'Sensitivity', min:0.5, max:3, step:0.05, val:1.4},
-      stiffness:{label:'Spring stiffness', min:20, max:320, step:5, val:130},
-      damping:{label:'Spring damping', min:2, max:44, step:1, val:16},
-      deadzone:{label:'Deadzone (°)', min:0, max:14, step:0.5, val:2},
-      posScale:{label:'Position push', min:0, max:3, step:0.05, val:1.1},
-      posReturn:{label:'Return speed', min:15, max:240, step:5, val:100},
-      posDamp:{label:'Position damping', min:2, max:44, step:1, val:16},
-    };
-    const P = (k)=>PARAMS[k].val;
-    const MODES = [
-      {id:'absolute', name:'Absolute 1:1', params:['deadzone'],
-        desc:'Sword orientation copies your phone exactly. Lowest latency and most direct — but every hand jitter shows up on the blade.'},
-      {id:'smoothed', name:'Smoothed', params:['smoothing','deadzone'],
-        desc:'Absolute mapping run through a low-pass filter. Steadier and less jittery, at the cost of a little lag. Tune Smoothing to taste.'},
-      {id:'amplified', name:'Amplified', params:['sensitivity','smoothing'],
-        desc:'Small wrist motions become big swings — less effort per hit. Great for couch play; can feel twitchy if too high.'},
-      {id:'spring', name:'Springy blade', params:['stiffness','damping'],
-        desc:'The blade eases toward your aim with real momentum and weight. Stiffer = snappier, lower damping = more overshoot/whip.'},
-      {id:'rate', name:'Rate / gyro', params:['sensitivity'],
-        desc:'Angular velocity spins the blade — no absolute reference, so it drifts, but flicks feel instant. Recalibrate to re-center.'},
-      {id:'nudge', name:'IMU nudge (spring-back)', params:['smoothing','posScale','posReturn','posDamp'],
-        desc:'📱 Phone only. The ANGLE stays from the gyro; physically moving the phone nudges the handle position a little, then a spring pulls it back to center — so it never drifts. A subtle thrust/parry feel. Reset re-centers.'},
+    const PARAMS={ smoothing:{label:'Smoothing (lag)',min:0,max:0.92,step:0.01,val:0.4},
+      sensitivity:{label:'Sensitivity',min:0.5,max:3,step:0.05,val:1.4},
+      stiffness:{label:'Spring stiffness',min:20,max:320,step:5,val:130}, damping:{label:'Spring damping',min:2,max:44,step:1,val:16},
+      deadzone:{label:'Deadzone (°)',min:0,max:35,step:0.5,val:0},
+      posScale:{label:'Position push',min:0,max:3,step:0.05,val:1.1}, posReturn:{label:'Return speed',min:15,max:240,step:5,val:100}, posDamp:{label:'Position damping',min:2,max:44,step:1,val:16} };
+    const P=(k)=>PARAMS[k].val;
+    const MODES=[
+      {id:'absolute',name:'Absolute 1:1',params:['deadzone'],desc:'Sword copies your phone exactly. Lowest latency; every jitter shows. Raise the Deadzone to ignore small hand tremor.'},
+      {id:'smoothed',name:'Smoothed',params:['smoothing','deadzone'],desc:'Absolute + low-pass. Steadier, slightly laggy.'},
+      {id:'amplified',name:'Amplified',params:['sensitivity','smoothing'],desc:'Small motions become big swings. Less effort; can feel twitchy.'},
+      {id:'spring',name:'Springy blade',params:['stiffness','damping','deadzone'],desc:'Blade eases toward your aim with momentum/weight.'},
+      {id:'rate',name:'Rate / gyro',params:['sensitivity'],desc:'Angular velocity spins the blade — no absolute reference, drifts. Reset to re-center.'},
+      {id:'nudge',name:'IMU nudge (spring-back)',params:['smoothing','posScale','posReturn','posDamp','deadzone'],desc:'📱 Angle from the gyro; moving the phone nudges the handle a little, then springs back. No drift.'},
     ];
-    let mode = MODES[0];
-    const omega = new THREE.Vector3(); // for spring mode
+    let mode=MODES[0]; const omega=new V();
 
-    function renderModes(){ const el=$('modes'); el.innerHTML='';
-      MODES.forEach(m=>{ const c=document.createElement('div'); c.className='chip'+(m===mode?' sel':''); c.textContent=m.name;
-        c.onclick=()=>{ mode=m; omega.set(0,0,0); renderModes(); renderSliders(); }; el.appendChild(c); }); }
-    function renderSliders(){ $('modeName').textContent=mode.name.toUpperCase(); $('modeDesc').textContent=mode.desc;
-      const s=$('sliders'); s.innerHTML='';
-      mode.params.forEach(k=>{ const p=PARAMS[k]; const row=document.createElement('div'); row.className='row';
-        row.innerHTML=`<label>${p.label}<b id="v_${k}">${p.val}</b></label><input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.val}">`;
-        const inp=row.querySelector('input'); inp.oninput=()=>{ p.val=parseFloat(inp.value); $('v_'+k).textContent=p.val; }; s.appendChild(row); }); }
+    // ---- deadzone (fixed & obvious): suppress rel rotations below N degrees ----
+    const _rel=new Q(),_target=new Q(),_tmp=new Q(),_axis=new V(),_dq=new Q();
+    function relQuat(out){ if(input.mode==='mouse'){ input.mYaw+=(input.mYawT-input.mYaw)*0.4; input.mPitch+=(input.mPitchT-input.mPitch)*0.4; out.setFromEuler(new THREE.Euler(input.mPitch,input.mYaw,0,'YXZ')); } else out.copy(input.refInv).multiply(input.rawQ); return out; }
+    function axisAngle(q){ let w=THREE.MathUtils.clamp(q.w,-1,1); let ang=2*Math.acos(w); const s=Math.sqrt(1-w*w); if(s<1e-5){_axis.set(1,0,0);ang=0;} else _axis.set(q.x/s,q.y/s,q.z/s); if(ang>Math.PI){ang-=2*Math.PI; _axis.negate();} return ang; }
+    function deadzoned(out){ const dz=P('deadzone')*Math.PI/180; const ang=axisAngle(out); if(dz<=0||ang===0) return out;
+      const mag=Math.abs(ang); if(mag<=dz){ out.identity(); return out; } // fully inside deadzone -> no rotation
+      const na=Math.sign(ang)*(mag-dz); out.setFromAxisAngle(_axis,na); return out; }
 
-    // helpers
-    const _rel=new THREE.Quaternion(), _target=new THREE.Quaternion(), _tmp=new THREE.Quaternion(), _axis=new THREE.Vector3(), _dq=new THREE.Quaternion();
-    function relQuat(out){
-      if(input.mode==='mouse'){ input.mYaw+=(input.mYawT-input.mYaw)*0.4; input.mPitch+=(input.mPitchT-input.mPitch)*0.4;
-        out.setFromEuler(new THREE.Euler(input.mPitch, input.mYaw, 0,'YXZ')); }
-      else out.copy(input.refInv).multiply(input.rawQ);
-      return out;
-    }
-    function axisAngle(q){ const w=THREE.MathUtils.clamp(q.w,-1,1); let ang=2*Math.acos(w); const s=Math.sqrt(1-w*w);
-      if(s<1e-5){ _axis.set(1,0,0); ang=0; } else _axis.set(q.x/s,q.y/s,q.z/s); if(ang>Math.PI) ang-=2*Math.PI; return ang; }
-    function applyDeadzone(rel){ const dz=P('deadzone')*Math.PI/180; if(dz<=0) return rel; const ang=axisAngle(rel);
-      const na=Math.sign(ang)*Math.max(0, Math.abs(ang)-dz); _dq.setFromAxisAngle(_axis, na); return _dq; }
+    const posOffset=new V(),posVel=new V(),_wAccel=new V(),posForce=new V();
+    function updatePosition(dt){ if(mode.id==='nudge'){ _wAccel.copy(input.accel).applyQuaternion(sword.quaternion);
+        posForce.copy(_wAccel).multiplyScalar(P('posScale')); posForce.addScaledVector(posOffset,-P('posReturn')); posForce.addScaledVector(posVel,-P('posDamp'));
+        posVel.addScaledVector(posForce,dt); posOffset.addScaledVector(posVel,dt); if(posOffset.length()>0.45)posOffset.setLength(0.45);
+      } else { posVel.multiplyScalar(Math.max(0,1-8*dt)); posOffset.multiplyScalar(Math.max(0,1-8*dt)); } }
 
-    let prevTip=new THREE.Vector3(), haveTip=false, tipSpeed=0, angSpeed=0, prevQ=new THREE.Quaternion();
-    // positional handle spring (IMU nudge mode) + camera zoom temps
-    const posOffset=new THREE.Vector3(), posVel=new THREE.Vector3(), _wAccel=new THREE.Vector3(), posForce=new THREE.Vector3(), _camDir=new THREE.Vector3();
-    function updatePosition(dt){
-      if(mode.id==='nudge'){
-        _wAccel.copy(input.accel).applyQuaternion(sword.quaternion); // device-frame accel -> world
-        posForce.copy(_wAccel).multiplyScalar(P('posScale'));         // driven by phone movement
-        posForce.addScaledVector(posOffset, -P('posReturn'));         // spring back to centre (no drift)
-        posForce.addScaledVector(posVel, -P('posDamp'));              // damping
-        posVel.addScaledVector(posForce, dt);
-        posOffset.addScaledVector(posVel, dt);
-        if(posOffset.length()>0.45) posOffset.setLength(0.45);
-      } else { // ease any offset back to zero when leaving the mode
-        posVel.multiplyScalar(Math.max(0,1-8*dt));
-        posOffset.multiplyScalar(Math.max(0,1-8*dt));
-      }
-    }
-    function resetAll(){
-      posOffset.set(0,0,0); posVel.set(0,0,0); omega.set(0,0,0);
-      input.refInv.copy(input.rawQ).invert(); input.hasCalib=true;
-      sword.quaternion.copy(mountQ);
-      $('hint').textContent='Reset — re-centered.';
-    }
-
-    function updateControl(dt){
-      relQuat(_rel);
-      if(mode.id==='rate'){
-        const r = input.rate.length()*P('sensitivity');
-        if(r>0.001){ _axis.copy(input.rate).normalize(); _dq.setFromAxisAngle(_axis, input.rate.length()*P('sensitivity')*dt*(input.mode==='mouse'?1:1)); sword.quaternion.multiply(_dq); }
-        return;
-      }
-      _target.copy(mountQ).multiply(applyDeadzone(_rel));
-      if(mode.id==='amplified'){ const ang=axisAngle(_rel)*P('sensitivity'); _dq.setFromAxisAngle(_axis, ang); _target.copy(mountQ).multiply(_dq); }
+    function updateControl(dt){ relQuat(_rel);
+      if(mode.id==='rate'){ const m=input.rate.length()*P('sensitivity'); if(m>0.001){ _axis.copy(input.rate).normalize(); _dq.setFromAxisAngle(_axis,m*dt); sword.quaternion.multiply(_dq); } return; }
+      deadzoned(_rel);
+      if(mode.id==='amplified'){ const ang=axisAngle(_rel)*P('sensitivity'); _dq.setFromAxisAngle(_axis,ang); _target.copy(mountQ).multiply(_dq); }
+      else _target.copy(mountQ).multiply(_rel);
       if(mode.id==='absolute'){ sword.quaternion.copy(_target); return; }
-      if(mode.id==='smoothed'||mode.id==='amplified'||mode.id==='nudge'){ const f=THREE.MathUtils.clamp(1-Math.pow(P('smoothing'),dt*60),0,1); sword.quaternion.slerp(_target, f||1); return; }
-      if(mode.id==='spring'){
-        _tmp.copy(_target).multiply(sword.quaternion.clone().invert()); // delta current->target (world)
-        const ang=axisAngle(_tmp);
-        const k=P('stiffness'), c=P('damping');
-        // angular acceleration toward target, damped
-        omega.addScaledVector(_axis, k*ang*dt);
-        omega.multiplyScalar(Math.max(0,1-c*dt));
-        const om=omega.length();
-        if(om>1e-5){ _axis.copy(omega).normalize(); _dq.setFromAxisAngle(_axis, om*dt); sword.quaternion.premultiply(_dq); }
-        return;
-      }
+      if(mode.id==='smoothed'||mode.id==='amplified'||mode.id==='nudge'){ const f=THREE.MathUtils.clamp(1-Math.pow(P('smoothing'),dt*60),0,1); sword.quaternion.slerp(_target,f||1); return; }
+      if(mode.id==='spring'){ _tmp.copy(_target).multiply(sword.quaternion.clone().invert()); const ang=axisAngle(_tmp);
+        omega.addScaledVector(_axis,P('stiffness')*ang*dt); omega.multiplyScalar(Math.max(0,1-P('damping')*dt)); const om=omega.length();
+        if(om>1e-5){ _axis.copy(omega).normalize(); _dq.setFromAxisAngle(_axis,om*dt); sword.quaternion.premultiply(_dq); } return; }
     }
+    function resetAll(){ posOffset.set(0,0,0);posVel.set(0,0,0);omega.set(0,0,0); input.refInv.copy(input.rawQ).invert(); input.hasCalib=true; sword.quaternion.copy(mountQ); $('hint').textContent='Reset — re-centered.'; }
 
-    // ---- loop ----
-    const clock=new THREE.Clock();
-    const curTip=new THREE.Vector3(), curBase=new THREE.Vector3(), curMid=new THREE.Vector3();
-    let fpsMs=0;
-    function frame(){
-      requestAnimationFrame(frame);
-      const dt=Math.min(0.05, clock.getDelta());
-      fpsMs = fpsMs*0.9 + dt*1000*0.1;
+    // =====================================================================
+    // Loop
+    // =====================================================================
+    const clock=new THREE.Clock(); let prevTip=new V(),haveTip=false,tipSpeed=0,angSpeed=0,prevQ=new Q(),shake=0,fpsMs=0;
+    const curTip=new V(),curBase=new V(),curMid=new V(),_camOff=new V();
+    // trail
+    const TN=16; const tpos=new Float32Array(TN*2*3); const tgeo=new THREE.BufferGeometry(); tgeo.setAttribute('position',new THREE.BufferAttribute(tpos,3));
+    const tidx=[]; for(let i=0;i<TN-1;i++){const o=i*2; tidx.push(o,o+1,o+2,o+2,o+1,o+3);} tgeo.setIndex(tidx);
+    const trail=new THREE.Mesh(tgeo,new THREE.MeshBasicMaterial({color:0x9fd8ff,transparent:true,opacity:0.3,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,depthWrite:false})); trail.frustumCulled=false; scene.add(trail);
+    const tsamp=[]; function pushTrail(a,b,inten){ const lim=QUALITY[opts.quality].trail; if(lim===0){ trail.visible=false; return; } trail.visible=true;
+      tsamp.push({a:a.clone(),b:b.clone()}); if(tsamp.length>lim)tsamp.shift();
+      for(let k=0;k<TN;k++){ const s=tsamp[Math.min(k,tsamp.length-1)]||tsamp[0]; const o=k*6; if(!s){tpos[o+1]=-100;tpos[o+4]=-100;continue;} tpos[o]=s.a.x;tpos[o+1]=s.a.y;tpos[o+2]=s.a.z;tpos[o+3]=s.b.x;tpos[o+4]=s.b.y;tpos[o+5]=s.b.z; }
+      tgeo.attributes.position.needsUpdate=true; trail.material.opacity=0.1+inten*0.35; }
 
-      updateControl(dt);
-      updatePosition(dt);
-      sword.position.copy(handAnchor).add(posOffset);
+    function frame(){ requestAnimationFrame(frame); const dt=Math.min(0.05,clock.getDelta()); fpsMs=fpsMs*0.9+dt*1000*0.1;
+      updateControl(dt); updatePosition(dt); sword.position.copy(CONFIG.hand).add(posOffset);
+      curBase.copy(sword.userData.BASE).applyQuaternion(sword.quaternion).add(sword.position);
+      curTip.copy(sword.userData.TIP).applyQuaternion(sword.quaternion).add(sword.position);
+      curMid.copy(sword.userData.MID).applyQuaternion(sword.quaternion).add(sword.position);
+      if(haveTip&&dt>0) tipSpeed=curTip.distanceTo(prevTip)/dt;
+      _tmp.copy(sword.quaternion).multiply(prevQ.clone().invert()); angSpeed=Math.abs(axisAngle(_tmp))/Math.max(dt,1e-3)*180/Math.PI; prevQ.copy(sword.quaternion);
+      pushTrail(curMid,curTip,THREE.MathUtils.clamp((tipSpeed-1.5)/8,0,1));
+      sword.userData.glow.intensity=THREE.MathUtils.clamp((tipSpeed-2)/8,0,1)*2;
 
-      curBase.copy(BLADE_BASE).applyQuaternion(sword.quaternion).add(sword.position);
-      curTip.copy(BLADE_TIP).applyQuaternion(sword.quaternion).add(sword.position);
-      curMid.copy(BLADE_BASE).lerp(BLADE_TIP,0.62).applyQuaternion(sword.quaternion).add(sword.position);
-      if(haveTip&&dt>0){ tipSpeed = curTip.distanceTo(prevTip)/dt; }
-      // angular speed from quaternion delta
-      _tmp.copy(sword.quaternion).multiply(prevQ.clone().invert()); angSpeed = Math.abs(axisAngle(_tmp))/Math.max(dt,1e-3)*180/Math.PI;
-      prevQ.copy(sword.quaternion);
-
-      pushTrail(curMid, curTip, THREE.MathUtils.clamp((tipSpeed-1.5)/8,0,1));
-      trail.material.opacity = 0.12 + THREE.MathUtils.clamp((tipSpeed-1.5)/12,0,1)*0.4;
-      glow.intensity = THREE.MathUtils.clamp((tipSpeed-2)/8,0,1)*2;
-
-      // slash targets (swept: prevTip->curTip segment vs orb)
-      for(const t of targets){ if(!t.alive) continue;
-        const d = Math.min(segDist(curBase,curTip,t.mesh.position,t.mesh.position), haveTip?segDist(prevTip,curTip,t.mesh.position,t.mesh.position):9);
-        if(d < 0.12+0.05 && tipSpeed>1.5){ t.alive=false; t.mesh.visible=false; score++; $('score').textContent=score;
-          setTimeout(()=>placeTarget(t), 300+Math.random()*400); }
-        else { t.mesh.rotation.y+=dt*1.5; t.mesh.material.emissiveIntensity=1.2+Math.sin(performance.now()*0.005+t.mesh.position.x)*0.4; }
-      }
+      const hbR = CONFIG.bladeR*opts.hitScale;
+      // orbs
+      updateOrbs(dt);
+      for(const o of orbs){ if(!o.alive)continue; const d=Math.min(segDist(curBase,curTip,o.mesh.position,o.mesh.position), haveTip?segDist(prevTip,curTip,o.mesh.position,o.mesh.position):9);
+        if(d < o.r+hbR && tipSpeed>1.4){ o.alive=false; o.mesh.visible=false; score++; $('score').textContent=score; burst(o.mesh.position,new V(0,0.5,1).normalize(),60,0x8effc0,3.4); playHit(55,false); setTimeout(()=>placeOrb(o),250+Math.random()*400); } }
+      // dummy
+      if(dummy.visible){ updateDummy(dt); dbody.updateMatrixWorld(true);
+        for(const cp of dCaps){ const a=cp.a.clone().applyMatrix4(cp.mesh.matrixWorld), b=cp.b.clone().applyMatrix4(cp.mesh.matrixWorld);
+          const d=segDist(curBase,curTip,a,b); if(d < cp.r+hbR && tipSpeed>1.8 && (!cp._cd||performance.now()-cp._cd>170)){ cp._cd=performance.now(); dummyHits++;
+            const hp=_c1.clone().lerp(_c2,0.5); burst(hp,curTip.clone().sub(prevTip).normalize(),75,cp.name==='head'?0xffd166:0xffd9a0,3.6); playHit(70,false);
+            const push=new V(curTip.x-prevTip.x,0,curTip.z-prevTip.z); dstate.vx+=push.z*3; dstate.vz-=push.x*3; dstate.pulse=1; } } }
+      // 2nd sword clash
+      if(enemy.visible){ updateEnemy(dt); checkClash(curBase,curTip); }
 
       prevTip.copy(curTip); haveTip=true;
+      updateSparks(dt); flashLight.intensity*=0.85;
+
+      // hitbox debug viz
+      dbg.visible=opts.hit;
+      if(opts.hit){ orientCyl(dbgBlade,curBase,curTip,hbR); dbgBlade.material.color.setHex(0x66ccff);
+        orbs.forEach((o,i)=>{ dbgOrbs[i].visible=o.alive; if(o.alive){ dbgOrbs[i].position.copy(o.mesh.position); dbgOrbs[i].scale.setScalar(o.r+hbR); } });
+        if(dummy.visible){ dbgDummy.forEach((m,i)=>{ m.visible=true; const cp=dCaps[i]; const a=cp.a.clone().applyMatrix4(cp.mesh.matrixWorld),b=cp.b.clone().applyMatrix4(cp.mesh.matrixWorld); orientCyl(m,a,b,cp.r); }); } else dbgDummy.forEach(m=>m.visible=false);
+        dbgEnemyBlade.visible=enemy.visible; if(enemy.visible) orientCyl(dbgEnemyBlade,CONFIG_BASE(enemy),CONFIG_TIP(enemy),CONFIG.bladeR);
+      }
+      reachViz.visible=opts.reach;
 
       // telemetry
       _e.setFromQuaternion(sword.quaternion,'YXZ');
-      $('tInput').textContent = input.mode==='sensor'?'phone IMU':input.mode==='mouse'?'mouse':'—';
-      $('tYPR').textContent = `${(_e.y*57.3|0)} / ${(_e.x*57.3|0)} / ${(_e.z*57.3|0)}`;
-      $('tAng').textContent = `${angSpeed|0}°/s`;
-      $('tTip').textContent = `${tipSpeed.toFixed(1)} m/s`;
-      $('tFps').textContent = `${fpsMs.toFixed(1)} ms`;
+      $('tInput').textContent=input.mode==='sensor'?'phone IMU':input.mode==='mouse'?'mouse':'—';
+      $('tYPR').textContent=`${_e.y*57.3|0} / ${_e.x*57.3|0} / ${_e.z*57.3|0}`;
+      $('tAng').textContent=`${angSpeed|0}°/s`; $('tTip').textContent=`${tipSpeed.toFixed(1)} m/s`; $('tFps').textContent=`${fpsMs.toFixed(1)} ms`;
 
-      // camera zoom (pinch / wheel)
-      camera.position.copy(camLook).addScaledVector(_camDir.copy(camBase).sub(camLook), zoom);
-      camera.lookAt(camLook);
-
+      // camera (zoom + shake)
+      shake*=0.86; _camOff.set((Math.random()-.5),(Math.random()-.5),0).multiplyScalar(shake);
+      camera.position.copy(camLook).addScaledVector(_camDir.copy(camBase).sub(camLook),zoom).add(_camOff); camera.lookAt(camLook);
       renderer.render(scene,camera);
     }
-    frame();
 
-    addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
-
-    // ---- UI wiring ----
+    // =====================================================================
+    // UI
+    // =====================================================================
+    function renderModes(){ const el=$('modes'); el.innerHTML=''; MODES.forEach(m=>{ const c=document.createElement('div'); c.className='chip'+(m===mode?' sel':''); c.textContent=m.name; c.onclick=()=>{ mode=m; omega.set(0,0,0); renderModes(); renderSliders(); }; el.appendChild(c); }); }
+    function renderSliders(){ $('modeName').textContent=mode.name.toUpperCase(); $('modeDesc').textContent=mode.desc; const s=$('sliders'); s.innerHTML='';
+      mode.params.forEach(k=>{ const p=PARAMS[k]; const row=document.createElement('div'); row.className='row'; row.innerHTML=`<label>${p.label}<b id="v_${k}">${p.val}</b></label><input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.val}">`;
+        const inp=row.querySelector('input'); inp.oninput=()=>{ p.val=parseFloat(inp.value); $('v_'+k).textContent=p.val; }; s.appendChild(row); }); }
     renderModes(); renderSliders();
-    $('enableBtn').onclick = enableMotion;
-    $('calBtn').onclick = calibrate;
-    $('resetBtn').onclick = resetAll;
-    $('panelBtn').onclick = ()=>{ const p=$('panel'); p.classList.toggle('hidden'); $('panelBtn').textContent = p.classList.contains('hidden')?'Show panel':'Hide panel'; };
+    $('enableBtn').onclick=enableMotion; $('calBtn').onclick=calibrate; $('resetBtn').onclick=resetAll;
+    $('panelBtn').onclick=()=>{ const p=$('panel'); p.classList.toggle('hidden'); $('panelBtn').textContent=p.classList.contains('hidden')?'Show panel':'Hide panel'; };
+    const bind=(id,key,fn)=>{ $(id).checked=opts[key]; $(id).onchange=()=>{ opts[key]=$(id).checked; fn&&fn(); }; };
+    bind('optMove','move'); bind('optReach','reach'); bind('optHit','hit');
+    bind('optDummy','dummy',()=>{ dummy.visible=opts.dummy; }); bind('optEnemy','enemy',()=>{ enemy.visible=opts.enemy; });
+    $('hitScale').oninput=()=>{ opts.hitScale=parseFloat($('hitScale').value); $('vHit').textContent=opts.hitScale.toFixed(2)+'×'; };
+    document.querySelectorAll('#qbtns button').forEach(b=> b.onclick=()=>applyQuality(b.dataset.q));
 
-    // expose for tinkering
-    window.lab = { input, MODES, PARAMS, resetAll, setZoom, get zoom(){return zoom;}, get posOffset(){return posOffset;},
-      setMode:(id)=>{ mode=MODES.find(m=>m.id===id)||mode; renderModes(); renderSliders(); }, get mode(){return mode.id;}, get score(){return score;} };
+    applyQuality('high'); onResize(); frame();
+
+    window.lab={ input, MODES, PARAMS, opts, resetAll, setZoom, applyQuality, get zoom(){return zoom;}, get posOffset(){return posOffset;}, get mode(){return mode.id;}, get score(){return score;}, get dummyHits(){return dummyHits;},
+      setMode:(id)=>{ mode=MODES.find(m=>m.id===id)||mode; renderModes(); renderSliders(); },
+      setOpt:(k,v)=>{ opts[k]=v; if(k==='dummy')dummy.visible=v; if(k==='enemy')enemy.visible=v; const el=$('opt'+k[0].toUpperCase()+k.slice(1)); if(el&&el.type==='checkbox')el.checked=v; },
+      orbInfo:()=> orbs.map(o=>({alive:o.alive, dist:+o.mesh.position.distanceTo(CONFIG.hand).toFixed(3)})), reach:CONFIG.reach, enemy };
   </script>
 </body>
 </html>

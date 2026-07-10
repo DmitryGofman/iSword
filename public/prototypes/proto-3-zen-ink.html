@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<title>iSword proto 3 — Zen Ink Dojo</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#efe9dc;touch-action:none;
+    font-family:Georgia,'Times New Roman',serif;-webkit-user-select:none;user-select:none}
+  canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;top:0;left:0;right:0;padding:16px 20px;display:flex;
+    justify-content:space-between;pointer-events:none;color:#2b2620}
+  #score{font-size:36px;font-weight:700;letter-spacing:.05em}
+  #chain{font-size:14px;color:#a3271e;min-height:18px;letter-spacing:.15em}
+  #hint{position:fixed;bottom:16px;left:0;right:0;text-align:center;color:#8a8172;font-size:13px;
+    pointer-events:none;font-style:italic}
+  b{color:#a3271e;font-style:normal}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div><div id="score">0</div><div id="chain"></div></div>
+  <div style="text-align:right;color:#8a8172;font-size:13px">PROTO 3<br><b style="letter-spacing:.2em">ZEN INK</b></div>
+</div>
+<div id="hint">Wait… then cut. Strike each orb <b>exactly when the closing ring touches it</b>.<br>
+Timing over speed — the meditative read of the same mechanic.</div>
+<script>
+'use strict';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = Math.min(2, window.devicePixelRatio || 1);
+function resize(){ W = innerWidth; H = innerHeight; cv.width = W*DPR; cv.height = H*DPR;
+  cv.style.width = W+'px'; cv.style.height = H+'px'; ctx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize', resize); resize();
+
+// paper texture, drawn once
+const paper = document.createElement('canvas');
+function makePaper(){
+  paper.width = 256; paper.height = 256;
+  const p = paper.getContext('2d');
+  p.fillStyle = '#efe9dc'; p.fillRect(0, 0, 256, 256);
+  const img = p.getImageData(0, 0, 256, 256);
+  for (let i = 0; i < img.data.length; i += 4){
+    const n = (Math.random()-0.5)*14;
+    img.data[i] += n; img.data[i+1] += n; img.data[i+2] += n*0.8;
+  }
+  p.putImageData(img, 0, 0);
+}
+makePaper();
+
+let AC = null;
+function audio(){ if (!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); return AC; }
+function tone(f, dur, vol){
+  try{
+    const ac = audio(), o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(vol||0.12, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+dur);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
+  }catch(e){}
+}
+
+// ---------- state ----------
+// Orb: appears, ring closes from ringK=2.6 down to 0; cut quality = |ringK-1| at the moment of the cut.
+const orbs = [], strokes = [], stamps = [], pops = [];
+let score = 0, chain = 0;
+const scoreEl = document.getElementById('score'), chainEl = document.getElementById('chain');
+
+let spawnT = 0.8;
+function spawn(){
+  orbs.push({
+    x: W*0.15 + Math.random()*W*0.7,
+    y: H*0.22 + Math.random()*H*0.55,
+    r: 30 + Math.random()*16,
+    ringK: 2.6, closeRate: 0.75 + Math.min(0.55, score/1500),
+    fade: 0, dead: false,
+  });
+}
+
+// ---------- input: brush-stroke trail ----------
+const trail = [];
+let down = false;
+function pt(e){ return { x:e.clientX, y:e.clientY, t:performance.now() }; }
+addEventListener('pointerdown', e => { audio(); down = true; trail.length = 0; trail.push(pt(e)); });
+addEventListener('pointerup', () => {
+  down = false;
+  if (trail.length > 3) strokes.push({ pts: trail.slice(), life: 1.6 });   // stroke lingers as ink
+  trail.length = 0;
+});
+addEventListener('pointermove', e => {
+  if (!down) return;
+  const p = pt(e), q = trail[trail.length-1]; trail.push(p);
+  if (!q) return;
+  const dt = Math.max(1, p.t-q.t);
+  if (Math.hypot(p.x-q.x, p.y-q.y)/dt*1000 < 300) return;
+  for (const o of orbs){
+    if (o.dead) continue;
+    if (segCircle(q.x, q.y, p.x, p.y, o.x, o.y, o.r+6)) cut(o);
+  }
+});
+function segCircle(x1,y1,x2,y2,cx,cy,r){
+  const dx = x2-x1, dy = y2-y1, l2 = dx*dx+dy*dy;
+  let t = l2 ? ((cx-x1)*dx+(cy-y1)*dy)/l2 : 0; t = Math.max(0, Math.min(1, t));
+  const px = x1+t*dx, py = y1+t*dy;
+  return (px-cx)*(px-cx)+(py-cy)*(py-cy) <= r*r;
+}
+function cut(o){
+  o.dead = true;
+  const err = Math.abs(o.ringK - 1);
+  let txt, pts, col;
+  if (err < 0.14){ txt = '斬  PERFECT'; pts = 100*(1+chain); chain++; col = '#a3271e';
+    stamps.push({ x:o.x, y:o.y, r:o.r, life:1.4 }); tone(880, 0.5, 0.14); tone(1320, 0.7, 0.06); }
+  else if (err < 0.42){ txt = 'GOOD'; pts = 40; chain = 0; col = '#5a5344'; tone(520, 0.3); }
+  else { txt = o.ringK > 1 ? 'EARLY' : 'LATE'; pts = 10; chain = 0; col = '#8a8172'; tone(200, 0.25); }
+  score += pts;
+  pops.push({ x:o.x, y:o.y - o.r - 14, txt: txt + '  +' + pts, col, life:1.4 });
+}
+
+// ---------- render ----------
+function drawOrb(o){
+  ctx.save(); ctx.translate(o.x, o.y);
+  const a = Math.min(1, o.fade*3);
+  // ink-wash body: layered translucent discs
+  for (let i = 3; i >= 0; i--){
+    ctx.globalAlpha = a * (0.16 + i*0.16);
+    ctx.fillStyle = '#2b2620';
+    ctx.beginPath(); ctx.arc(0, 0, o.r*(1 - i*0.14), 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = a*0.9; ctx.fillStyle = '#efe9dc';
+  ctx.beginPath(); ctx.arc(-o.r*0.3, -o.r*0.3, o.r*0.14, 0, 7); ctx.fill();
+  // the closing timing ring
+  if (o.ringK > 0){
+    const near = Math.abs(o.ringK-1) < 0.14;
+    ctx.globalAlpha = a; ctx.lineWidth = near ? 3 : 1.6;
+    ctx.strokeStyle = near ? '#a3271e' : 'rgba(43,38,32,.55)';
+    ctx.beginPath(); ctx.arc(0, 0, o.r*o.ringK, 0, 7); ctx.stroke();
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+function strokeWidth(i, n){ const t = i/(n-1); return 14 * Math.sin(Math.PI*Math.min(1, t*1.2)) + 1.5; }
+function drawStroke(pts, alpha){
+  if (pts.length < 2) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (let i = 1; i < pts.length; i++){
+    ctx.globalAlpha = alpha * 0.85;
+    ctx.strokeStyle = '#1d1913';
+    ctx.lineWidth = strokeWidth(i, pts.length);
+    ctx.beginPath(); ctx.moveTo(pts[i-1].x, pts[i-1].y); ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+    // dry-brush edge
+    ctx.globalAlpha = alpha * 0.25; ctx.lineWidth *= 1.8;
+    ctx.stroke();
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+
+let last = performance.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.035, (now-last)/1000); last = now;
+
+  spawnT -= dt;
+  const maxOrbs = 1 + Math.min(3, score/400|0);
+  if (spawnT <= 0 && orbs.filter(o => !o.dead).length < maxOrbs){
+    spawn(); spawnT = 1.4 + Math.random()*1.2;
+  }
+  for (let i = orbs.length-1; i >= 0; i--){
+    const o = orbs[i];
+    o.fade = Math.min(1, o.fade + dt*2);
+    if (o.dead){ o.fade -= dt*4; if (o.fade <= 0) orbs.splice(i, 1); continue; }
+    o.ringK -= o.closeRate*dt;
+    if (o.ringK <= 0){                       // faded away = miss
+      o.dead = true; chain = 0;
+      pops.push({ x:o.x, y:o.y, txt:'…', col:'#8a8172', life:1 });
+      tone(140, 0.3, 0.08);
+    }
+  }
+  for (let i = strokes.length-1; i >= 0; i--){
+    strokes[i].life -= dt; if (strokes[i].life <= 0) strokes.splice(i, 1);
+  }
+  for (let i = stamps.length-1; i >= 0; i--){
+    stamps[i].life -= dt; if (stamps[i].life <= 0) stamps.splice(i, 1);
+  }
+  for (let i = pops.length-1; i >= 0; i--){
+    const p = pops[i]; p.y -= 26*dt; p.life -= dt;
+    if (p.life <= 0) pops.splice(i, 1);
+  }
+
+  // paper
+  ctx.fillStyle = ctx.createPattern(paper, 'repeat'); ctx.fillRect(0, 0, W, H);
+  // faint sun disc, sumi-e style
+  ctx.globalAlpha = 0.12; ctx.fillStyle = '#a3271e';
+  ctx.beginPath(); ctx.arc(W*0.82, H*0.2, Math.min(W,H)*0.11, 0, 7); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  for (const o of orbs) drawOrb(o);
+  for (const s of strokes) drawStroke(s.pts, Math.min(1, s.life));
+  while (trail.length && now - trail[0].t > 200) trail.shift();
+  drawStroke(trail, 1);
+
+  // red seal stamps on perfects
+  for (const s of stamps){
+    ctx.save(); ctx.translate(s.x, s.y); ctx.globalAlpha = Math.min(1, s.life)*0.9;
+    ctx.fillStyle = '#a3271e';
+    const w = s.r*1.5;
+    ctx.rotate(-0.08); ctx.fillRect(-w/2, -w/2, w, w);
+    ctx.fillStyle = '#efe9dc'; ctx.font = `bold ${w*0.62}px Georgia, serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('斬', 0, w*0.04);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+  for (const p of pops){
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.font = '600 20px Georgia, serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = p.col; ctx.fillText(p.txt, p.x, p.y);
+  }
+  ctx.globalAlpha = 1;
+
+  scoreEl.textContent = score;
+  chainEl.textContent = chain > 1 ? '連 CHAIN ×' + chain : '';
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

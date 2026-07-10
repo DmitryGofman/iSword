@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<title>iSword proto 2 — Blade Corridor</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0b0616;touch-action:none;
+    font-family:system-ui,-apple-system,sans-serif;-webkit-user-select:none;user-select:none}
+  canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;top:0;left:0;right:0;padding:14px 18px;display:flex;
+    justify-content:space-between;pointer-events:none;color:#efe7ff}
+  #score{font-size:34px;font-weight:800;text-shadow:0 0 18px #b26bff}
+  #streak{font-size:15px;font-weight:700;color:#37e6ff;text-shadow:0 0 10px #37e6ff;min-height:20px}
+  #hint{position:fixed;bottom:16px;left:0;right:0;text-align:center;color:#8a7fae;font-size:13px;pointer-events:none}
+  b{color:#b26bff}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div><div id="score">0</div><div id="streak"></div></div>
+  <div style="text-align:right;color:#8a7fae;font-size:13px">PROTO 2<br><b>BLADE CORRIDOR</b></div>
+</div>
+<div id="hint">Orbs fly at you down the corridor — <b>cut through the ring in the arrow's direction</b> as it arrives.<br>
+Right direction = PERFECT ×2. This is the mechanic that maps 1:1 onto IMU swing direction.</div>
+<script>
+'use strict';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W = 0, H = 0, CX = 0, CY = 0, DPR = Math.min(2, window.devicePixelRatio || 1);
+function resize(){ W = innerWidth; H = innerHeight; CX = W/2; CY = H*0.44;
+  cv.width = W*DPR; cv.height = H*DPR; cv.style.width = W+'px'; cv.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize', resize); resize();
+
+let AC = null;
+function audio(){ if (!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); return AC; }
+function blip(f, dur, type, vol){
+  try{
+    const ac = audio(), o = ac.createOscillator(), g = ac.createGain();
+    o.type = type||'sine'; o.frequency.setValueAtTime(f, ac.currentTime);
+    o.frequency.exponentialRampToValueAtTime(Math.max(40, f*0.55), ac.currentTime+dur);
+    g.gain.setValueAtTime(vol||0.15, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+dur);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
+  }catch(e){}
+}
+
+// ---------- world ----------
+// Orbs live at depth z (1 = far, 0 = at the blade plane). Projected with scale = FOC/(FOC + z*DEPTH).
+// Lateral offset shrinks as z->0 so orbs converge on the hit zone instead of flying off-screen.
+const FOC = 240, DEPTH = 1600, NEAR = 0.18;
+function latK(){ return W/214; }   // == 4.2 at the 900px design width
+function verK(){ return H/143; }   // == 4.2 at the 600px design height
+const DIRS = {
+  R:{ v:[ 1, 0], arrow:0            },
+  L:{ v:[-1, 0], arrow:Math.PI      },
+  D:{ v:[ 0, 1], arrow:Math.PI/2    },
+  U:{ v:[ 0,-1], arrow:-Math.PI/2   },
+};
+const DIRKEYS = Object.keys(DIRS);
+const orbs = [], parts = [], pops = [], trail = [];
+let score = 0, streak = 0, shake = 0, redFlash = 0, gridZ = 0;
+const scoreEl = document.getElementById('score'), streakEl = document.getElementById('streak');
+
+let spawnT = 1, speed = 0.34;                 // z units per second
+function spawn(){
+  const lane = (Math.random()*3|0) - 1;       // -1 0 1
+  const row  = (Math.random()*2|0) - 0.5;     // -0.5 / 0.5
+  orbs.push({
+    wx: lane * 150, wy: row * 130 + 20, z: 1,
+    dir: DIRKEYS[(Math.random()*DIRKEYS.length)|0],
+    hue: 265 + Math.random()*60, hit: false,
+  });
+}
+function proj(o){
+  const s = FOC / (FOC + o.z*DEPTH);
+  const conv = 0.42 + 0.58*o.z;                 // pull toward center as it nears
+  return { x: CX + o.wx*s*latK()*conv, y: CY + o.wy*s*verK()*conv, r: 120*s, s };
+}
+
+// ---------- input ----------
+let down = false;
+function pt(e){ return { x:e.clientX, y:e.clientY, t:performance.now() }; }
+addEventListener('pointerdown', e => { audio(); down = true; trail.length = 0; trail.push(pt(e)); });
+addEventListener('pointerup',   () => { down = false; });
+addEventListener('pointermove', e => {
+  if (!down) return;
+  const p = pt(e), q = trail[trail.length-1]; trail.push(p);
+  if (!q) return;
+  const dt = Math.max(1, p.t-q.t), dx = p.x-q.x, dy = p.y-q.y;
+  if (Math.hypot(dx, dy)/dt*1000 < 320) return;
+  for (const o of orbs){
+    if (o.hit || o.z > NEAR) continue;               // only sliceable in the near window
+    const pr = proj(o);
+    if (segCircle(q.x, q.y, p.x, p.y, pr.x, pr.y, pr.r+8)) cut(o, dx, dy, pr);
+  }
+});
+function segCircle(x1,y1,x2,y2,cx,cy,r){
+  const dx = x2-x1, dy = y2-y1, l2 = dx*dx+dy*dy;
+  let t = l2 ? ((cx-x1)*dx+(cy-y1)*dy)/l2 : 0; t = Math.max(0, Math.min(1, t));
+  const px = x1+t*dx, py = y1+t*dy;
+  return (px-cx)*(px-cx)+(py-cy)*(py-cy) <= r*r;
+}
+function cut(o, dx, dy, pr){
+  o.hit = true;
+  const want = DIRS[o.dir].v, m = Math.hypot(dx, dy);
+  const dot = (dx*want[0] + dy*want[1]) / (m || 1);
+  const perfect = dot > 0.55;
+  streak = perfect ? streak+1 : 0;
+  const pts = perfect ? 20*(1+Math.min(9, streak)) : 5;
+  score += pts; shake = perfect ? 9 : 4;
+  blip(perfect ? 640+streak*40 : 220, perfect ? 0.16 : 0.2, perfect ? 'triangle' : 'square', 0.18);
+  pops.push({ x:pr.x, y:pr.y, txt: perfect ? 'PERFECT +'+pts : 'SLOPPY +'+pts,
+    col: perfect ? '#37e6ff' : '#8a7fae', life:1 });
+  const n = perfect ? 22 : 8;
+  for (let i = 0; i < n; i++){
+    const a = Math.atan2(dy, dx) + (Math.random()-0.5)*1.6, v = 160+Math.random()*380;
+    parts.push({ x:pr.x, y:pr.y, vx:Math.cos(a)*v, vy:Math.sin(a)*v, hue:o.hue, life:0.4+Math.random()*0.4 });
+  }
+}
+
+// ---------- render ----------
+function corridor(dt){
+  gridZ = (gridZ + speed*dt) % 0.125;
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#0b0616'); g.addColorStop(0.55, '#150a2b'); g.addColorStop(1, '#241040');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  // rings sliding toward the camera
+  for (let i = 0; i < 9; i++){
+    const z = i*0.125 - gridZ + 0.02;
+    if (z <= 0) continue;
+    const s = FOC/(FOC + z*DEPTH), hw = 190*s*latK(), hh = 160*s*verK();
+    ctx.strokeStyle = `rgba(120,80,255,${0.05 + 0.28*(1-z)})`;
+    ctx.lineWidth = 1 + 1.5*(1-z);
+    ctx.strokeRect(CX-hw, CY-hh, hw*2, hh*2);
+  }
+  // rails to the vanishing point
+  ctx.strokeStyle = 'rgba(55,230,255,.22)'; ctx.lineWidth = 1;
+  for (const [ex, ey] of [[-1,-1],[1,-1],[-1,1],[1,1]]){
+    ctx.beginPath(); ctx.moveTo(CX, CY);
+    ctx.lineTo(CX + ex*190*latK(), CY + ey*160*verK()); ctx.stroke();
+  }
+  // hit zone marker
+  const s0 = FOC/(FOC + 0.10*DEPTH), hw0 = 190*s0*latK(), hh0 = 160*s0*verK();
+  ctx.strokeStyle = 'rgba(55,230,255,.5)'; ctx.setLineDash([10, 8]); ctx.lineWidth = 2;
+  ctx.strokeRect(CX-hw0, CY-hh0, hw0*2, hh0*2); ctx.setLineDash([]);
+  ctx.restore();
+}
+function drawOrb(o){
+  const p = proj(o), near = o.z < NEAR;
+  ctx.save(); ctx.translate(p.x, p.y);
+  ctx.shadowColor = `hsl(${o.hue} 100% 65%)`; ctx.shadowBlur = near ? 30 : 12;
+  const g = ctx.createRadialGradient(-p.r*0.3, -p.r*0.3, p.r*0.1, 0, 0, p.r);
+  g.addColorStop(0, `hsl(${o.hue} 100% ${near?85:70}%)`);
+  g.addColorStop(1, `hsl(${o.hue} 85% ${near?45:25}%)`);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, p.r, 0, 7); ctx.fill();
+  if (near){ ctx.strokeStyle = '#37e6ff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, 0, p.r+7, 0, 7); ctx.stroke(); }
+  // direction arrow
+  ctx.rotate(DIRS[o.dir].arrow);
+  ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.shadowBlur = 0;
+  const a = p.r*0.55;
+  ctx.beginPath(); ctx.moveTo(a, 0); ctx.lineTo(-a*0.5, -a*0.62);
+  ctx.lineTo(-a*0.15, 0); ctx.lineTo(-a*0.5, a*0.62); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawTrail(now){
+  while (trail.length && now - trail[0].t > 130) trail.shift();
+  if (trail.length < 2) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (let pass = 0; pass < 2; pass++){
+    ctx.beginPath(); ctx.moveTo(trail[0].x, trail[0].y);
+    for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
+    ctx.strokeStyle = pass ? 'rgba(255,255,255,.95)' : 'rgba(178,107,255,.5)';
+    ctx.lineWidth = pass ? 3.5 : 12;
+    ctx.shadowColor = '#b26bff'; ctx.shadowBlur = pass ? 12 : 24;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+let last = performance.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.035, (now-last)/1000); last = now;
+
+  spawnT -= dt;
+  if (spawnT <= 0){ spawn(); spawnT = Math.max(0.55, 1.5 - score/600); }
+  speed = 0.34 + Math.min(0.3, score/2500);
+
+  for (let i = orbs.length-1; i >= 0; i--){
+    const o = orbs[i]; o.z -= speed*dt;
+    if (o.hit){ orbs.splice(i, 1); continue; }
+    if (o.z <= -0.04){                              // flew past: miss
+      orbs.splice(i, 1); streak = 0; redFlash = 1;
+      blip(120, 0.25, 'sawtooth', 0.2);
+      pops.push({ x:CX, y:H*0.8, txt:'MISS', col:'#ff5c7a', life:1 });
+    }
+  }
+  for (let i = parts.length-1; i >= 0; i--){
+    const p = parts[i]; p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 500*dt; p.life -= dt;
+    if (p.life <= 0) parts.splice(i, 1);
+  }
+  for (let i = pops.length-1; i >= 0; i--){
+    const p = pops[i]; p.y -= 55*dt; p.life -= dt*1.15;
+    if (p.life <= 0) pops.splice(i, 1);
+  }
+  shake = Math.max(0, shake-55*dt); redFlash = Math.max(0, redFlash-3*dt);
+
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+  corridor(dt);
+  orbs.sort((a, b) => b.z - a.z);
+  for (const o of orbs) drawOrb(o);
+  ctx.shadowBlur = 0;
+  for (const p of parts){
+    ctx.globalAlpha = Math.max(0, p.life*1.8);
+    ctx.fillStyle = `hsl(${p.hue} 100% 72%)`; ctx.fillRect(p.x-2, p.y-2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+  drawTrail(now);
+  for (const p of pops){
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.font = 'bold 24px system-ui'; ctx.textAlign = 'center';
+    ctx.fillStyle = p.col; ctx.shadowColor = p.col; ctx.shadowBlur = 12;
+    ctx.fillText(p.txt, p.x, p.y); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  if (redFlash > 0){ ctx.fillStyle = `rgba(255,40,80,${redFlash*0.25})`; ctx.fillRect(0, 0, W, H); }
+
+  scoreEl.textContent = score;
+  streakEl.textContent = streak > 1 ? `STREAK ×${streak}` : '';
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

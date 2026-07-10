@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<title>iSword proto 4 — Sphere Storm</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#12060a;touch-action:none;
+    font-family:system-ui,-apple-system,sans-serif;-webkit-user-select:none;user-select:none}
+  canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;top:0;left:0;right:0;padding:14px 18px;display:flex;
+    justify-content:space-between;pointer-events:none;color:#ffe9d6}
+  #score{font-size:34px;font-weight:800;text-shadow:0 0 18px #ff7a2f}
+  #wave{font-size:14px;font-weight:700;color:#ffb36b;letter-spacing:.1em}
+  #feverWrap{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);width:min(420px,72vw);
+    height:10px;border-radius:6px;background:rgba(255,255,255,.12);overflow:hidden;pointer-events:none}
+  #fever{height:100%;width:0%;background:linear-gradient(90deg,#ff7a2f,#ffd23c);
+    box-shadow:0 0 14px #ff7a2f;transition:width .12s}
+  #hint{position:fixed;bottom:32px;left:0;right:0;text-align:center;color:#b08268;font-size:13px;pointer-events:none}
+  #over{position:fixed;inset:0;display:none;place-items:center;background:rgba(10,3,5,.82);color:#ffe9d6;
+    text-align:center;font-size:20px}
+  b{color:#ff7a2f}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div><div id="score">0</div><div id="wave">WAVE 1</div></div>
+  <div style="text-align:right;color:#b08268;font-size:13px">PROTO 4<br><b>SPHERE STORM</b></div>
+</div>
+<div id="feverWrap"><div id="fever"></div></div>
+<div id="hint"><b>Defend the core.</b> Slash the storm before it reaches the center — fill the meter for <b>FEVER slow-mo</b>.</div>
+<div id="over"><div>💥 THE CORE HAS FALLEN 💥<br><br><span id="finalScore"></span><br><br><b>tap to restart</b></div></div>
+<script>
+'use strict';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W = 0, H = 0, CX = 0, CY = 0, DPR = Math.min(2, window.devicePixelRatio || 1);
+function resize(){ W = innerWidth; H = innerHeight; CX = W/2; CY = H/2;
+  cv.width = W*DPR; cv.height = H*DPR; cv.style.width = W+'px'; cv.style.height = H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize', resize); resize();
+
+let AC = null;
+function audio(){ if (!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); return AC; }
+function blip(f, dur, type, vol){
+  try{
+    const ac = audio(), o = ac.createOscillator(), g = ac.createGain();
+    o.type = type||'sine'; o.frequency.setValueAtTime(f, ac.currentTime);
+    o.frequency.exponentialRampToValueAtTime(Math.max(40, f*0.5), ac.currentTime+dur);
+    g.gain.setValueAtTime(vol||0.15, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+dur);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
+  }catch(e){}
+}
+
+// ---------- state ----------
+let orbs, parts, pops, trail, score, wave, waveT, spawnT, coreHP, fever, feverOn, feverT,
+    shake, hitStop, dead, ringPulse;
+function reset(){
+  orbs = []; parts = []; pops = []; trail = [];
+  score = 0; wave = 1; waveT = 0; spawnT = 1; coreHP = 5;
+  fever = 0; feverOn = false; feverT = 0;
+  shake = 0; hitStop = 0; dead = false; ringPulse = 0;
+  overEl.style.display = 'none';
+}
+const scoreEl = document.getElementById('score'), waveEl = document.getElementById('wave'),
+      feverEl = document.getElementById('fever'), overEl = document.getElementById('over'),
+      finalEl = document.getElementById('finalScore');
+
+function spawn(){
+  const a = Math.random()*Math.PI*2, R = Math.hypot(W, H)*0.6;
+  const dart = Math.random() < Math.min(0.4, 0.08 + wave*0.04);   // darters lunge in bursts
+  orbs.push({
+    x: CX + Math.cos(a)*R, y: CY + Math.sin(a)*R,
+    r: dart ? 16 : 22 + Math.random()*12,
+    sp: (dart ? 150 : 55) + wave*9 + Math.random()*25,
+    hue: dart ? 8 : 22 + Math.random()*28,
+    dart, wob: Math.random()*7, hp: 1,
+  });
+}
+
+// ---------- input ----------
+let down = false;
+function pt(e){ return { x:e.clientX, y:e.clientY, t:performance.now() }; }
+addEventListener('pointerdown', e => {
+  audio();
+  if (dead){ reset(); return; }
+  down = true; trail.length = 0; trail.push(pt(e));
+});
+addEventListener('pointerup', () => { down = false; });
+addEventListener('pointermove', e => {
+  if (!down || dead) return;
+  const p = pt(e), q = trail[trail.length-1]; trail.push(p);
+  if (!q) return;
+  const dt = Math.max(1, p.t-q.t), dx = p.x-q.x, dy = p.y-q.y;
+  if (Math.hypot(dx, dy)/dt*1000 < 320) return;
+  for (let i = orbs.length-1; i >= 0; i--){
+    const o = orbs[i];
+    if (segCircle(q.x, q.y, p.x, p.y, o.x, o.y, o.r+7)){ orbs.splice(i, 1); kill(o, dx, dy); }
+  }
+});
+function segCircle(x1,y1,x2,y2,cx,cy,r){
+  const dx = x2-x1, dy = y2-y1, l2 = dx*dx+dy*dy;
+  let t = l2 ? ((cx-x1)*dx+(cy-y1)*dy)/l2 : 0; t = Math.max(0, Math.min(1, t));
+  const px = x1+t*dx, py = y1+t*dy;
+  return (px-cx)*(px-cx)+(py-cy)*(py-cy) <= r*r;
+}
+function kill(o, dx, dy){
+  const pts = (o.dart ? 25 : 10) * wave * (feverOn ? 2 : 1);
+  score += pts; shake = 8; hitStop = 0.045;                 // hit-stop sells the impact
+  blip(o.dart ? 700 : 440, 0.12, 'triangle', 0.18);
+  pops.push({ x:o.x, y:o.y, txt:'+'+pts, col:feverOn ? '#ffd23c' : '#ff9c53', life:1 });
+  const ang = Math.atan2(dy, dx);
+  for (let i = 0; i < 18; i++){
+    const a = ang + (Math.random()-0.5)*2.2, v = 140+Math.random()*420;
+    parts.push({ x:o.x, y:o.y, vx:Math.cos(a)*v, vy:Math.sin(a)*v, hue:o.hue, life:0.35+Math.random()*0.45 });
+  }
+  if (!feverOn){
+    fever = Math.min(1, fever + 0.09);
+    if (fever >= 1){ feverOn = true; feverT = 4.5; blip(300, 0.6, 'sawtooth', 0.2); blip(600, 0.6, 'square', 0.1);
+      pops.push({ x:CX, y:CY-70, txt:'FEVER!', col:'#ffd23c', life:1.6 }); }
+  }
+}
+function coreHit(o){
+  coreHP--; shake = 22; ringPulse = 1;
+  blip(90, 0.5, 'sawtooth', 0.3);
+  for (let i = 0; i < 30; i++){
+    const a = Math.random()*7, v = 120+Math.random()*300;
+    parts.push({ x:CX, y:CY, vx:Math.cos(a)*v, vy:Math.sin(a)*v, hue:190, life:0.5+Math.random()*0.5 });
+  }
+  if (coreHP <= 0){ dead = true; finalEl.textContent = 'Final score: ' + score + '  ·  wave ' + wave;
+    overEl.style.display = 'grid'; }
+}
+
+// ---------- render ----------
+function bg(t){
+  const g = ctx.createRadialGradient(CX, CY, 60, CX, CY, Math.hypot(W, H)*0.6);
+  if (feverOn){ g.addColorStop(0, '#3a1c05'); g.addColorStop(1, '#160902'); }
+  else { g.addColorStop(0, '#2a0e14'); g.addColorStop(1, '#0d040a'); }
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // drifting embers
+  ctx.fillStyle = 'rgba(255,140,60,.25)';
+  for (let i = 0; i < 24; i++){
+    const x = (i*173.3 + t*0.014*(10+i%7)) % W;
+    const y = H - ((i*97.7 + t*0.03*(8+i%5)) % H);
+    ctx.fillRect(x, y, 2, 2);
+  }
+}
+function drawCore(t){
+  ctx.save(); ctx.translate(CX, CY);
+  const pulse = 1 + Math.sin(t*0.004)*0.05 + ringPulse*0.25;
+  ctx.shadowColor = '#3ad6ff'; ctx.shadowBlur = 30;
+  const g = ctx.createRadialGradient(0, 0, 4, 0, 0, 26*pulse);
+  g.addColorStop(0, '#eafcff'); g.addColorStop(0.5, '#3ad6ff'); g.addColorStop(1, '#0a4a66');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 26*pulse, 0, 7); ctx.fill();
+  // HP pips as an arc ring
+  ctx.shadowBlur = 0; ctx.lineWidth = 5;
+  for (let i = 0; i < 5; i++){
+    const a0 = -Math.PI/2 + i*(Math.PI*2/5) + 0.09, a1 = a0 + Math.PI*2/5 - 0.18;
+    ctx.strokeStyle = i < coreHP ? '#3ad6ff' : 'rgba(255,255,255,.12)';
+    ctx.beginPath(); ctx.arc(0, 0, 44, a0, a1); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawOrb(o, t){
+  ctx.save(); ctx.translate(o.x, o.y);
+  ctx.shadowColor = `hsl(${o.hue} 100% 55%)`; ctx.shadowBlur = o.dart ? 26 : 18;
+  const g = ctx.createRadialGradient(-o.r*0.3, -o.r*0.3, 2, 0, 0, o.r);
+  g.addColorStop(0, `hsl(${o.hue} 100% 78%)`); g.addColorStop(1, `hsl(${o.hue} 92% 34%)`);
+  ctx.fillStyle = g;
+  if (o.dart){                                     // darters are jagged shards
+    ctx.rotate(Math.atan2(CY-o.y, CX-o.x));
+    ctx.beginPath(); ctx.moveTo(o.r*1.6, 0); ctx.lineTo(-o.r, -o.r*0.8);
+    ctx.lineTo(-o.r*0.4, 0); ctx.lineTo(-o.r, o.r*0.8); ctx.closePath(); ctx.fill();
+  } else {
+    const wob = 1 + Math.sin(t*0.006 + o.wob)*0.06;
+    ctx.beginPath(); ctx.arc(0, 0, o.r*wob, 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawTrail(now){
+  while (trail.length && now - trail[0].t > 130) trail.shift();
+  if (trail.length < 2) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const col = feverOn ? '#ffd23c' : '#ff7a2f';
+  for (let pass = 0; pass < 2; pass++){
+    ctx.beginPath(); ctx.moveTo(trail[0].x, trail[0].y);
+    for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
+    ctx.strokeStyle = pass ? 'rgba(255,255,255,.95)' : col;
+    ctx.globalAlpha = pass ? 1 : 0.5;
+    ctx.lineWidth = pass ? 3.5 : 13;
+    ctx.shadowColor = col; ctx.shadowBlur = pass ? 14 : 28;
+    ctx.stroke();
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+
+reset();
+let last = performance.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  let dt = Math.min(0.035, (now-last)/1000); last = now;
+  if (hitStop > 0){ hitStop -= dt; dt = 0; }        // freeze frame on kill
+  const ts = feverOn ? 0.38 : 1;                    // fever slow-mo
+  const gdt = dead ? 0 : dt*ts;
+
+  if (!dead){
+    waveT += gdt;
+    if (waveT > 18){ waveT = 0; wave++; pops.push({ x:CX, y:CY-90, txt:'WAVE '+wave, col:'#ffb36b', life:1.6 }); }
+    spawnT -= gdt;
+    if (spawnT <= 0){ spawn(); spawnT = Math.max(0.28, 1.1 - wave*0.09) * (0.7+Math.random()*0.6); }
+    if (feverOn){ feverT -= dt; fever = Math.max(0, feverT/4.5); if (feverT <= 0){ feverOn = false; fever = 0; } }
+  }
+
+  for (let i = orbs.length-1; i >= 0; i--){
+    const o = orbs[i];
+    const d = Math.hypot(CX-o.x, CY-o.y) || 1;
+    o.x += (CX-o.x)/d * o.sp * gdt; o.y += (CY-o.y)/d * o.sp * gdt;
+    if (d < 40){ orbs.splice(i, 1); coreHit(o); }
+  }
+  for (let i = parts.length-1; i >= 0; i--){
+    const p = parts[i]; p.x += p.vx*dt; p.y += p.vy*dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt;
+    if (p.life <= 0) parts.splice(i, 1);
+  }
+  for (let i = pops.length-1; i >= 0; i--){
+    const p = pops[i]; p.y -= 55*dt; p.life -= dt;
+    if (p.life <= 0) pops.splice(i, 1);
+  }
+  shake = Math.max(0, shake-70*dt); ringPulse = Math.max(0, ringPulse-3*dt);
+
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+  bg(now);
+  drawCore(now);
+  for (const o of orbs) drawOrb(o, now);
+  ctx.shadowBlur = 0;
+  for (const p of parts){
+    ctx.globalAlpha = Math.max(0, p.life*1.8);
+    ctx.fillStyle = `hsl(${p.hue} 100% 70%)`; ctx.fillRect(p.x-2, p.y-2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+  drawTrail(now);
+  for (const p of pops){
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.font = 'bold 26px system-ui'; ctx.textAlign = 'center';
+    ctx.fillStyle = p.col; ctx.shadowColor = p.col; ctx.shadowBlur = 12;
+    ctx.fillText(p.txt, p.x, p.y); ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  if (feverOn){ ctx.fillStyle = 'rgba(255,210,60,.06)'; ctx.fillRect(0, 0, W, H); }
+
+  scoreEl.textContent = score;
+  waveEl.textContent = 'WAVE ' + wave + '  ·  ' + '◆'.repeat(coreHP) + '◇'.repeat(5-coreHP);
+  feverEl.style.width = (fever*100).toFixed(0) + '%';
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

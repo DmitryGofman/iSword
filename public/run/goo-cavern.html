@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<title>iSword RUN — Goo Cavern</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#03151a;touch-action:none;
+    font-family:system-ui,-apple-system,sans-serif;-webkit-user-select:none;user-select:none}
+  canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;top:0;left:0;right:0;padding:12px 16px;display:flex;
+    justify-content:space-between;pointer-events:none;color:#d8fff4}
+  .big{font-size:30px;font-weight:800;text-shadow:0 0 16px #2fffc4}
+  #dna{color:#ff6bd6;font-size:18px;font-weight:800;text-shadow:0 0 12px #ff6bd6}
+  #combo{color:#2fffc4;font-weight:700;font-size:15px;min-height:18px}
+  #hearts{font-size:17px;letter-spacing:2px}
+  #hint{position:fixed;bottom:12px;left:0;right:0;text-align:center;color:#5e8a80;font-size:12.5px;pointer-events:none}
+  b{color:#ff6bd6}
+  #over{position:fixed;inset:0;display:none;place-items:center;background:rgba(2,12,15,.88);color:#d8fff4;text-align:center}
+  #over h1{margin:0 0 4px;font-size:30px;text-shadow:0 0 20px #ff6bd6}
+  #over .stats{color:#8fb8ac;font-size:15px;line-height:1.7;margin-bottom:14px}
+  .shop{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:18px;max-width:560px}
+  .shop button{background:#0a2a2a;color:#d8fff4;border:1px solid #ff6bd655;border-radius:12px;
+    padding:10px 14px;font-size:13.5px;font-weight:600;cursor:pointer}
+  .shop button:disabled{opacity:.42}
+  #again{background:#ff6bd6;color:#26041e;border:0;border-radius:14px;padding:13px 34px;
+    font-size:17px;font-weight:800;cursor:pointer;box-shadow:0 0 24px #ff6bd666}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div><div class="big" id="dist">0m</div><div id="combo"></div></div>
+  <div style="text-align:center"><div id="dna">🧬 0</div><div id="hearts"></div></div>
+  <div style="text-align:right;color:#5e8a80;font-size:12.5px">RUN C<br><b>GOO CAVERN</b></div>
+</div>
+<div id="hint">Cut a blob and it <b>splits</b> — cut the babies for 🧬. Ignore blobs and they <b>merge into a MEGA</b>.<br>
+When goo splats your screen, <b>wipe it off</b> with your finger.</div>
+<div id="over"><div>
+  <h1>DIGESTED</h1>
+  <div class="stats" id="stats"></div>
+  <div class="shop" id="shop"></div>
+  <button id="again">DIVE AGAIN</button>
+</div></div>
+<script>
+'use strict';
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+let W=0,H=0,CX=0,CY=0,DPR=Math.min(2,window.devicePixelRatio||1);
+function resize(){W=innerWidth;H=innerHeight;CX=W/2;CY=H*0.46;
+  cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+'px';cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);}
+addEventListener('resize',resize);resize();
+
+let AC=null;
+function audio(){if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();return AC;}
+function blip(f,dur,type,vol){try{
+  const ac=audio(),o=ac.createOscillator(),g=ac.createGain();
+  o.type=type||'sine';o.frequency.setValueAtTime(f,ac.currentTime);
+  o.frequency.exponentialRampToValueAtTime(Math.max(35,f*0.5),ac.currentTime+dur);
+  g.gain.setValueAtTime(vol||0.15,ac.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+dur);
+  o.connect(g).connect(ac.destination);o.start();o.stop(ac.currentTime+dur);
+}catch(e){}}
+
+// ---------- save ----------
+const SAVE_KEY='iswordRunGoo';
+let save={wallet:0,up:{chain:0,slow:0,enzyme:0}};
+try{const s=JSON.parse(localStorage.getItem(SAVE_KEY));if(s&&s.up)save=s;}catch(e){}
+function persist(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(save));}catch(e){}}
+const SHOP=[
+  {id:'chain', name:'⚡ Chain Enzyme',desc:'cuts arc to a 2nd baby', cost:l=>180*(l+1),max:3},
+  {id:'slow',  name:'🫧 Reflex Gel',  desc:'time slows near impact', cost:l=>220*(l+1),max:3},
+  {id:'enzyme',name:'🧪 Rich Cytoplasm',desc:'+1 🧬 per baby',       cost:l=>150*(l+1),max:3},
+];
+
+// ---------- tunnel world ----------
+// Entities sit at angle a around the tunnel axis, depth z (1 = deep, 0 = your face).
+const FOC=210,DEPTH=1400,NEAR=0.24,RADIUS=()=>Math.min(W,H)*0.42;
+function proj(a,z){
+  const s=FOC/(FOC+z*DEPTH);
+  return {x:CX+Math.cos(a)*RADIUS()*s*1.35,y:CY+Math.sin(a)*RADIUS()*s*1.1,s};
+}
+let blobs,parts,pops,trail,splats;
+let dist,combo,comboT,hearts,dnaRun,kills,speedZ,spawnT,ringZ,shake,flash,dead,timeK;
+function reset(){
+  blobs=[];parts=[];pops=[];trail=[];splats=[];
+  dist=0;combo=0;comboT=0;dnaRun=0;kills=0;hearts=3;
+  speedZ=0.4;spawnT=0.9;ringZ=0;shake=0;flash=0;dead=false;timeK=1;
+  overEl.style.display='none';
+}
+const distEl=document.getElementById('dist'),dnaEl=document.getElementById('dna'),
+      comboEl=document.getElementById('combo'),heartsEl=document.getElementById('hearts'),
+      overEl=document.getElementById('over'),statsEl=document.getElementById('stats'),
+      shopEl=document.getElementById('shop');
+
+function spawn(){
+  blobs.push({a:Math.random()*Math.PI*2,z:1,kind:'big',r:44,wob:Math.random()*7,hp:1});
+}
+
+// ---------- input ----------
+let down=false;
+function pt(e){return{x:e.clientX,y:e.clientY,t:performance.now()};}
+addEventListener('pointerdown',e=>{audio();if(dead)return;down=true;trail.length=0;trail.push(pt(e));});
+addEventListener('pointerup',()=>{down=false;});
+addEventListener('pointermove',e=>{
+  if(!down||dead)return;
+  const p=pt(e),q=trail[trail.length-1];trail.push(p);
+  if(!q)return;
+  const dt=Math.max(1,p.t-q.t),dx=p.x-q.x,dy=p.y-q.y;
+  if(Math.hypot(dx,dy)/dt*1000<300)return;
+  // wiping goo splats always works (any swipe over them)
+  for(let i=splats.length-1;i>=0;i--){const s=splats[i];
+    if(segCircle(q.x,q.y,p.x,p.y,s.x,s.y,s.r)){
+      s.hp-=1;s.r*=0.86;blip(200+s.hp*80,0.08,'sine',0.08);
+      if(s.hp<=0){splats.splice(i,1);pops.push({x:s.x,y:s.y,txt:'CLEAN',col:'#2fffc4',life:0.7});}
+    }}
+  for(let i=blobs.length-1;i>=0;i--){
+    const o=blobs[i];if(o.z>NEAR)continue;
+    const pr=proj(o.a,Math.max(0.02,o.z));
+    if(segCircle(q.x,q.y,p.x,p.y,pr.x,pr.y,pr.s*o.r+10))cutBlob(i,dx,dy);
+  }
+});
+function segCircle(x1,y1,x2,y2,cx,cy,r){
+  const dx=x2-x1,dy=y2-y1,l2=dx*dx+dy*dy;
+  let t=l2?((cx-x1)*dx+(cy-y1)*dy)/l2:0;t=Math.max(0,Math.min(1,t));
+  const px=x1+t*dx,py=y1+t*dy;
+  return (px-cx)*(px-cx)+(py-cy)*(py-cy)<=r*r;
+}
+function cutBlob(i,dx,dy){
+  const o=blobs[i],pr=proj(o.a,Math.max(0.02,o.z));
+  o.hp--;
+  if(o.hp>0){ // mega takes 2 cuts
+    shake=8;blip(180,0.15,'square',0.18);
+    pops.push({x:pr.x,y:pr.y,txt:'CRACK',col:'#ff6bd6',life:0.8});return;
+  }
+  blobs.splice(i,1);
+  combo++;comboT=1.6;kills++;shake=7;
+  goo(pr.x,pr.y,o.kind==='baby'?10:20);
+  if(o.kind==='baby'){
+    const pay=1+save.up.enzyme;dnaRun+=pay;
+    blip(760+combo*30,0.12,'triangle',0.16);
+    pops.push({x:pr.x,y:pr.y,txt:'+'+pay+'🧬',col:'#ff6bd6',life:1});
+    if(save.up.chain&&Math.random()<0.3*save.up.chain){ // chain arcs to another baby
+      const j=blobs.findIndex(b=>b.kind==='baby'&&b.z<NEAR+0.1);
+      if(j>=0){const b=blobs[j],bp=proj(b.a,Math.max(0.02,b.z));
+        ctxZap.push({x1:pr.x,y1:pr.y,x2:bp.x,y2:bp.y,life:0.25});
+        cutBlob(j,dx,dy);}
+    }
+  }else{ // big / mega splits into babies
+    const n=o.kind==='mega'?4:2;
+    blip(320,0.16,'square',0.18);
+    pops.push({x:pr.x,y:pr.y,txt:'SPLIT!',col:'#2fffc4',life:1});
+    for(let k2=0;k2<n;k2++)
+      blobs.push({a:o.a+(k2-(n-1)/2)*0.55+(Math.random()-0.5)*0.2,
+        z:Math.min(0.9,o.z+0.15+Math.random()*0.1),kind:'baby',r:20,wob:Math.random()*7,hp:1});
+  }
+}
+const ctxZap=[];
+function goo(x,y,n){
+  for(let i=0;i<n;i++){const a=Math.random()*7,v=120+Math.random()*380;
+    parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,col:Math.random()<0.5?'#ff6bd6':'#2fffc4',life:0.4+Math.random()*0.4});}
+}
+function splatScreen(big){
+  splats.push({x:W*0.15+Math.random()*W*0.7,y:H*0.2+Math.random()*H*0.55,
+    r:big?110:70,hp:3,seed:Math.random()*100});
+}
+function loseHeart(n,why){
+  hearts-=n;combo=0;shake=20;flash=1;blip(85,0.45,'sawtooth',0.28);
+  pops.push({x:CX,y:H*0.6,txt:why,col:'#ff6bd6',life:1.2});
+  if(hearts<=0)die();
+}
+function die(){
+  dead=true;save.wallet+=dnaRun;persist();
+  statsEl.innerHTML=`depth <b style="color:#2fffc4">${Math.round(dist)}m</b> · blobs burst <b>${kills}</b><br>`+
+    `🧬 this dive <b style="color:#ff6bd6">${dnaRun}</b> · strain bank <b style="color:#ff6bd6">🧬 ${save.wallet}</b>`;
+  renderShop();overEl.style.display='grid';
+}
+function renderShop(){
+  shopEl.innerHTML='';
+  for(const it of SHOP){
+    const lv=save.up[it.id],b=document.createElement('button');
+    if(lv>=it.max){b.textContent=`${it.name} MAX`;b.disabled=true;}
+    else{const c=it.cost(lv);
+      b.innerHTML=`${it.name} lv${lv} → ${lv+1}<br><span style="color:#ff6bd6">🧬 ${c}</span> · <span style="color:#8fb8ac">${it.desc}</span>`;
+      b.disabled=save.wallet<c;
+      b.onclick=()=>{save.wallet-=c;save.up[it.id]++;persist();die();};}
+    shopEl.appendChild(b);
+  }
+}
+document.getElementById('again').onclick=()=>reset();
+
+// ---------- render ----------
+function tunnel(t){
+  const g=ctx.createRadialGradient(CX,CY,30,CX,CY,Math.hypot(W,H)*0.62);
+  g.addColorStop(0,'#04333c');g.addColorStop(0.6,'#032128');g.addColorStop(1,'#010d11');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  // breathing flesh rings sliding outward
+  for(let i=0;i<10;i++){
+    let z=(i*0.1+(1-ringZ))%1;if(z<0.015)continue;
+    const s=FOC/(FOC+z*DEPTH);
+    const pul=1+Math.sin(t*0.003+i*1.7)*0.04;
+    ctx.strokeStyle=`hsla(${175+Math.sin(i*2.2)*20},80%,45%,${0.06+0.3*(1-z)})`;
+    ctx.lineWidth=(1+9*(1-z))*pul;
+    ctx.beginPath();
+    for(let k2=0;k2<=26;k2++){const a=k2/26*Math.PI*2;
+      const wobble=1+Math.sin(a*5+t*0.002+i)*0.05;
+      const x=CX+Math.cos(a)*RADIUS()*s*1.35*wobble,y=CY+Math.sin(a)*RADIUS()*s*1.1*wobble;
+      k2?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+    ctx.closePath();ctx.stroke();
+  }
+  // glowing pores
+  ctx.fillStyle='rgba(255,107,214,.35)';
+  for(let i=0;i<16;i++){
+    let z=((i*0.37)+(1-ringZ)*1.3)%1;if(z<0.05)continue;
+    const s=FOC/(FOC+z*DEPTH),a=i*2.4;
+    const x=CX+Math.cos(a)*RADIUS()*s*1.3,y=CY+Math.sin(a)*RADIUS()*s*1.05;
+    ctx.beginPath();ctx.arc(x,y,5*s*(1/Math.max(0.2,z))*0.4+1,0,7);ctx.fill();
+  }
+}
+function drawBlob(o,t){
+  const pr=proj(o.a,Math.max(0.02,o.z)),near=o.z<NEAR,r=pr.s*o.r;
+  ctx.save();ctx.translate(pr.x,pr.y);
+  const hue=o.kind==='baby'?315:o.kind==='mega'?350:300;
+  ctx.shadowColor=`hsl(${hue} 100% 65%)`;ctx.shadowBlur=near?30:14;
+  const sq=1+Math.sin(t*0.007+o.wob)*0.16;ctx.scale(sq,2-sq); // squishy
+  const g=ctx.createRadialGradient(-r*0.3,-r*0.3,r*0.1,0,0,r);
+  g.addColorStop(0,`hsl(${hue} 100% 86%)`);g.addColorStop(0.55,`hsl(${hue} 90% 60%)`);
+  g.addColorStop(1,`hsl(${hue} 85% 30%)`);
+  ctx.fillStyle=g;
+  ctx.beginPath();                                             // lumpy outline
+  for(let k2=0;k2<=20;k2++){const a=k2/20*Math.PI*2;
+    const rr=r*(1+Math.sin(a*3+t*0.004+o.wob)*0.1);
+    k2?ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr):ctx.moveTo(Math.cos(a)*rr,Math.sin(a)*rr);}
+  ctx.closePath();ctx.fill();
+  if(near){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.globalAlpha=0.7;ctx.stroke();ctx.globalAlpha=1;}
+  // nucleus
+  ctx.fillStyle=`hsla(${hue},100%,25%,.8)`;
+  ctx.beginPath();ctx.arc(r*0.1,r*0.05,r*0.32,0,7);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.75)';
+  ctx.beginPath();ctx.arc(r*0.02,-r*0.04,r*0.1,0,7);ctx.fill();
+  if(o.kind==='mega'&&o.hp>1){ctx.fillStyle='#fff';ctx.font=`bold ${r*0.5}px system-ui`;
+    ctx.textAlign='center';ctx.fillText('×2',0,-r*0.5);}
+  ctx.restore();
+}
+function drawSplat(s,t){
+  ctx.save();ctx.translate(s.x,s.y);
+  ctx.fillStyle='rgba(90,220,120,.55)';
+  ctx.beginPath();
+  for(let k2=0;k2<=18;k2++){const a=k2/18*Math.PI*2;
+    const rr=s.r*(1+Math.sin(a*4+s.seed)*0.22+Math.sin(a*7+s.seed*2)*0.1);
+    k2?ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr):ctx.moveTo(Math.cos(a)*rr,Math.sin(a)*rr);}
+  ctx.closePath();ctx.fill();
+  ctx.fillStyle='rgba(60,180,90,.5)';
+  ctx.beginPath();ctx.arc(s.r*0.3,s.r*0.2,s.r*0.35,0,7);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.8)';ctx.font='bold 15px system-ui';ctx.textAlign='center';
+  ctx.fillText('wipe! ×'+s.hp,0,4);
+  ctx.restore();
+}
+function drawTrail(now){
+  while(trail.length&&now-trail[0].t>130)trail.shift();
+  if(trail.length<2)return;
+  ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
+  for(let pass=0;pass<2;pass++){
+    ctx.beginPath();ctx.moveTo(trail[0].x,trail[0].y);
+    for(let i=1;i<trail.length;i++)ctx.lineTo(trail[i].x,trail[i].y);
+    ctx.strokeStyle=pass?'rgba(255,255,255,.95)':'rgba(47,255,196,.5)';
+    ctx.lineWidth=pass?3.5:12;ctx.shadowColor='#2fffc4';ctx.shadowBlur=pass?14:26;ctx.stroke();}
+  ctx.restore();
+}
+
+reset();
+let last=performance.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  let dt=Math.min(0.035,(now-last)/1000);last=now;
+  // reflex gel: slow time when something is about to hit
+  const danger=blobs.some(b=>b.z<0.14&&b.kind!=='baby');
+  timeK+= (((danger&&save.up.slow)?1-0.14*save.up.slow:1)-timeK)*Math.min(1,dt*8);
+  const gdt=dead?0:dt*timeK;
+
+  speedZ=Math.min(0.95,speedZ+gdt*0.007);
+  dist+=gdt*speedZ*90;
+  ringZ=(ringZ+speedZ*gdt*0.9)%1;
+  spawnT-=gdt*speedZ*1.8;
+  if(spawnT<=0&&!dead){spawn();spawnT=0.8+Math.random()*0.7;}
+  comboT-=gdt;if(comboT<=0)combo=0;
+
+  // advance + merge check
+  for(const o of blobs)o.z-=speedZ*gdt*(o.kind==='baby'?0.34:0.27);
+  for(let i=blobs.length-1;i>=0;i--){
+    const a2=blobs[i];if(!a2||a2.kind!=='big')continue;
+    for(let j=i-1;j>=0;j--){
+      const b=blobs[j];if(b.kind!=='big')continue;
+      let da=Math.abs(a2.a-b.a);da=Math.min(da,Math.PI*2-da);
+      if(da<0.55&&Math.abs(a2.z-b.z)<0.09){
+        blobs.splice(i,1);blobs.splice(j,1);
+        blobs.push({a:(a2.a+b.a)/2,z:Math.max(a2.z,b.z),kind:'mega',r:62,wob:Math.random()*7,hp:2});
+        pops.push({x:CX,y:CY-60,txt:'MEGA BLOB FORMING',col:'#ff6bd6',life:1.3});
+        blip(140,0.4,'sawtooth',0.16);
+        i=Math.min(i,blobs.length-1);break;
+      }
+    }
+  }
+  for(let i=blobs.length-1;i>=0;i--){
+    const o=blobs[i];
+    if(o.z<=-0.02){
+      blobs.splice(i,1);
+      if(o.kind==='big'){loseHeart(1,'SPLAT!');splatScreen(false);}
+      else if(o.kind==='mega'){loseHeart(2,'MEGA SPLAT!');splatScreen(true);}
+      else combo=0;
+    }
+  }
+  for(let i=parts.length-1;i>=0;i--){const p=parts[i];
+    p.x+=p.vx*dt;p.y+=p.vy*dt;p.vy+=500*dt;p.life-=dt;if(p.life<=0)parts.splice(i,1);}
+  for(let i=pops.length-1;i>=0;i--){const p=pops[i];p.y-=50*dt;p.life-=dt*1.05;if(p.life<=0)pops.splice(i,1);}
+  for(let i=ctxZap.length-1;i>=0;i--){ctxZap[i].life-=dt;if(ctxZap[i].life<=0)ctxZap.splice(i,1);}
+  shake=Math.max(0,shake-70*dt);flash=Math.max(0,flash-2.5*dt);
+
+  ctx.save();
+  if(shake>0)ctx.translate((Math.random()-0.5)*shake,(Math.random()-0.5)*shake);
+  tunnel(now);
+  blobs.sort((a2,b)=>b.z-a2.z);
+  for(const o of blobs)drawBlob(o,now);
+  ctx.shadowBlur=0;
+  for(const z of ctxZap){ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=2.5;
+    ctx.shadowColor='#2fffc4';ctx.shadowBlur=12;
+    ctx.beginPath();ctx.moveTo(z.x1,z.y1);
+    const mx=(z.x1+z.x2)/2+(Math.random()-0.5)*30,my=(z.y1+z.y2)/2+(Math.random()-0.5)*30;
+    ctx.lineTo(mx,my);ctx.lineTo(z.x2,z.y2);ctx.stroke();ctx.shadowBlur=0;}
+  for(const p of parts){ctx.globalAlpha=Math.max(0,p.life*1.8);ctx.fillStyle=p.col;ctx.fillRect(p.x-2.5,p.y-2.5,5,5);}
+  ctx.globalAlpha=1;
+  drawTrail(now);
+  for(const p of pops){ctx.globalAlpha=Math.max(0,p.life);
+    ctx.font='bold 23px system-ui';ctx.textAlign='center';
+    ctx.fillStyle=p.col;ctx.shadowColor=p.col;ctx.shadowBlur=12;
+    ctx.fillText(p.txt,p.x,p.y);ctx.shadowBlur=0;ctx.globalAlpha=1;}
+  ctx.restore();
+  for(const s of splats)drawSplat(s,now);   // splats sit ON the camera, unshaken
+  if(flash>0){ctx.fillStyle=`rgba(255,107,214,${flash*0.28})`;ctx.fillRect(0,0,W,H);}
+  if(timeK<0.97){ctx.fillStyle='rgba(47,255,196,.05)';ctx.fillRect(0,0,W,H);}
+
+  distEl.textContent=Math.round(dist)+'m';
+  dnaEl.textContent='🧬 '+dnaRun;
+  comboEl.textContent=combo>1?'CHAIN ×'+combo:'';
+  heartsEl.textContent='💚'.repeat(Math.max(0,hearts))+'🖤'.repeat(Math.max(0,3-hearts));
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

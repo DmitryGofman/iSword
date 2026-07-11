@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<title>iSword proto 1 — Neon Arcade Slicer</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#07070f;touch-action:none;
+    font-family:system-ui,-apple-system,sans-serif;-webkit-user-select:none;user-select:none}
+  canvas{display:block;width:100vw;height:100vh}
+  #hud{position:fixed;top:0;left:0;right:0;padding:14px 18px;display:flex;
+    justify-content:space-between;align-items:flex-start;pointer-events:none;color:#e8f6ff}
+  #score{font-size:34px;font-weight:800;text-shadow:0 0 18px #37e6ff}
+  #combo{font-size:16px;font-weight:700;color:#ffd23c;text-shadow:0 0 12px #ffb300;min-height:20px}
+  #hint{position:fixed;bottom:16px;left:0;right:0;text-align:center;color:#7f8db0;
+    font-size:13px;pointer-events:none}
+  b{color:#37e6ff}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div><div id="score">0</div><div id="combo"></div></div>
+  <div style="text-align:right;color:#7f8db0;font-size:13px">PROTO 1<br><b>NEON ARCADE</b></div>
+</div>
+<div id="hint">Swipe fast through the orbs — chain slices for combos. Avoid the <b style="color:#ff5c7a">red mines</b>.<br>
+(On the phone build, your swipe = the real IMU swing direction &amp; speed.)</div>
+<script>
+'use strict';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = Math.min(2, window.devicePixelRatio || 1);
+function resize(){ W = innerWidth; H = innerHeight; cv.width = W*DPR; cv.height = H*DPR;
+  cv.style.width = W+'px'; cv.style.height = H+'px'; ctx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize', resize); resize();
+
+// ---------- audio (tiny synth, starts on first touch) ----------
+let AC = null;
+function audio(){ if (!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); return AC; }
+function blip(f, dur, type, vol){
+  try{
+    const ac = audio(), o = ac.createOscillator(), g = ac.createGain();
+    o.type = type||'sine'; o.frequency.setValueAtTime(f, ac.currentTime);
+    o.frequency.exponentialRampToValueAtTime(f*0.5, ac.currentTime+dur);
+    g.gain.setValueAtTime(vol||0.15, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+dur);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime+dur);
+  }catch(e){}
+}
+
+// ---------- game state ----------
+const orbs = [], halves = [], parts = [], pops = [], trail = [];
+let score = 0, combo = 0, comboT = 0, shake = 0, flash = 0;
+const GRAV = 1400;
+const scoreEl = document.getElementById('score'), comboEl = document.getElementById('combo');
+
+const HUES = [190, 280, 140, 45, 330]; // cyan, purple, green, gold, pink
+function spawnWave(){
+  const n = 1 + (Math.random()*2.2|0) + Math.min(2, score/800|0);
+  for (let i = 0; i < n; i++){
+    const bomb = Math.random() < 0.14 && score > 100;
+    const x = W*0.2 + Math.random()*W*0.6;
+    orbs.push({
+      x, y: H + 40, r: bomb ? 26 : 28 + Math.random()*14,
+      vx: (W/2 - x)*(0.25+Math.random()*0.5) / 1.0,
+      vy: -(H*1.25 + Math.random()*H*0.45),
+      hue: HUES[(Math.random()*HUES.length)|0],
+      bomb, spin: (Math.random()-0.5)*6, a: Math.random()*7,
+    });
+  }
+}
+let spawnT = 0.5;
+
+// ---------- slicing ----------
+function segCircle(x1,y1,x2,y2,cx,cy,r){
+  const dx = x2-x1, dy = y2-y1, l2 = dx*dx+dy*dy;
+  let t = l2 ? ((cx-x1)*dx + (cy-y1)*dy)/l2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const px = x1+t*dx, py = y1+t*dy;
+  return (px-cx)*(px-cx)+(py-cy)*(py-cy) <= r*r;
+}
+function slice(o, dx, dy, speed){
+  const ang = Math.atan2(dy, dx);
+  if (o.bomb){
+    score = Math.max(0, score - 50); combo = 0; shake = 18; flash = 1;
+    blip(90, 0.4, 'sawtooth', 0.3);
+    for (let i = 0; i < 26; i++) parts.push(spark(o.x, o.y, 0, 60));
+    pop(o.x, o.y, '-50', '#ff5c7a');
+    return;
+  }
+  combo++; comboT = 1.1;
+  const pts = 10 * combo;
+  score += pts; shake = Math.min(10, 3+speed*0.002);
+  blip(420 + combo*60, 0.14, 'triangle', 0.18);
+  pop(o.x, o.y, '+'+pts, `hsl(${o.hue} 90% 70%)`);
+  // two halves fly apart perpendicular to the cut
+  const px = -Math.sin(ang), py = Math.cos(ang), kick = 120 + speed*0.12;
+  for (const s of [-1, 1]){
+    halves.push({ x:o.x, y:o.y, vx:o.vx*0.4 + px*kick*s, vy:o.vy*0.25 + py*kick*s - 80,
+      r:o.r, hue:o.hue, ang, side:s, rot:o.a, vr:(Math.random()-0.5)*8, life:1 });
+  }
+  for (let i = 0; i < 14; i++) parts.push(spark(o.x, o.y, o.hue, 30));
+}
+function spark(x, y, hue, sp){
+  const a = Math.random()*7, v = 60 + Math.random()*sp*8;
+  return { x, y, vx:Math.cos(a)*v, vy:Math.sin(a)*v-60, hue, life:0.5+Math.random()*0.4 };
+}
+function pop(x, y, txt, col){ pops.push({x, y, txt, col, life:1}); }
+
+// ---------- input: swipe trail ----------
+let down = false;
+function pt(e){ return { x:e.clientX, y:e.clientY, t:performance.now() }; }
+addEventListener('pointerdown', e => { audio(); down = true; trail.length = 0; trail.push(pt(e)); });
+addEventListener('pointerup',   () => { down = false; });
+addEventListener('pointermove', e => {
+  if (!down) return;
+  const p = pt(e), q = trail[trail.length-1];
+  trail.push(p);
+  if (!q) return;
+  const dt = Math.max(1, p.t - q.t), dx = p.x-q.x, dy = p.y-q.y;
+  const speed = Math.hypot(dx, dy) / dt * 1000;           // px/s
+  if (speed < 350) return;                                 // must be a real swing
+  for (let i = orbs.length-1; i >= 0; i--){
+    const o = orbs[i];
+    if (segCircle(q.x, q.y, p.x, p.y, o.x, o.y, o.r+6)){
+      orbs.splice(i, 1); slice(o, dx, dy, speed);
+    }
+  }
+});
+
+// ---------- render helpers ----------
+function bg(){
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#0a0a1e'); g.addColorStop(0.7, '#100a26'); g.addColorStop(1, '#1a0f33');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // glow horizon + floor grid
+  ctx.save(); ctx.globalAlpha = 0.5;
+  const hy = H*0.78;
+  const gg = ctx.createLinearGradient(0, hy-60, 0, hy+10);
+  gg.addColorStop(0, 'rgba(55,230,255,0)'); gg.addColorStop(1, 'rgba(55,230,255,.25)');
+  ctx.fillStyle = gg; ctx.fillRect(0, hy-60, W, 70);
+  ctx.strokeStyle = 'rgba(120,80,255,.28)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 14; i++){                    // converging verticals
+    const x = (i/14)*W;
+    ctx.beginPath(); ctx.moveTo(x, H); ctx.lineTo(W/2 + (x-W/2)*0.45, hy); ctx.stroke();
+  }
+  for (let i = 0; i < 6; i++){                      // horizontals
+    const y = hy + (H-hy)*Math.pow(i/6, 1.7);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawOrb(o){
+  ctx.save(); ctx.translate(o.x, o.y); ctx.rotate(o.a);
+  if (o.bomb){
+    ctx.shadowColor = '#ff2050'; ctx.shadowBlur = 24;
+    ctx.fillStyle = '#2a0a12'; ctx.strokeStyle = '#ff5c7a'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++){
+      const a = i/10*Math.PI*2, r = i%2 ? o.r : o.r*1.45;
+      ctx[i ? 'lineTo' : 'moveTo'](Math.cos(a)*r, Math.sin(a)*r);
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ff5c7a'; ctx.font = 'bold 18px system-ui';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✕', 0, 1);
+  } else {
+    ctx.shadowColor = `hsl(${o.hue} 100% 60%)`; ctx.shadowBlur = 26;
+    const g = ctx.createRadialGradient(-o.r*0.35, -o.r*0.35, o.r*0.1, 0, 0, o.r);
+    g.addColorStop(0, `hsl(${o.hue} 100% 85%)`);
+    g.addColorStop(0.55, `hsl(${o.hue} 95% 55%)`);
+    g.addColorStop(1, `hsl(${o.hue} 90% 32%)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, o.r, 0, 7); ctx.fill();
+    ctx.strokeStyle = `hsla(${o.hue},100%,80%,.8)`; ctx.lineWidth = 2; ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawHalf(h){
+  ctx.save(); ctx.translate(h.x, h.y); ctx.rotate(h.rot);
+  ctx.globalAlpha = Math.max(0, h.life);
+  ctx.shadowColor = `hsl(${h.hue} 100% 60%)`; ctx.shadowBlur = 16;
+  const g = ctx.createRadialGradient(0, 0, h.r*0.1, 0, 0, h.r);
+  g.addColorStop(0, `hsl(${h.hue} 95% 70%)`); g.addColorStop(1, `hsl(${h.hue} 90% 34%)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, h.r, h.ang + (h.side>0?0:Math.PI), h.ang + (h.side>0?Math.PI:0)); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = `hsla(${h.hue},100%,88%,.9)`;
+  ctx.beginPath(); ctx.arc(0, 0, h.r, h.ang + (h.side>0?0:Math.PI), h.ang + (h.side>0?Math.PI:0)); ctx.closePath();
+  ctx.clip(); ctx.fillRect(-h.r, -h.r, h.r*2, 4); // bright cut face
+  ctx.restore();
+}
+function drawTrail(now){
+  while (trail.length && now - trail[0].t > 130) trail.shift();
+  if (trail.length < 2) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (let pass = 0; pass < 2; pass++){
+    ctx.beginPath(); ctx.moveTo(trail[0].x, trail[0].y);
+    for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
+    ctx.strokeStyle = pass ? 'rgba(255,255,255,.95)' : 'rgba(55,230,255,.5)';
+    ctx.lineWidth = pass ? 3.5 : 12;
+    ctx.shadowColor = '#37e6ff'; ctx.shadowBlur = pass ? 14 : 26;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---------- main loop ----------
+let last = performance.now();
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.035, (now - last)/1000); last = now;
+
+  spawnT -= dt;
+  if (spawnT <= 0){ spawnWave(); spawnT = 1.15 + Math.random()*0.9; }
+  comboT -= dt; if (comboT <= 0) combo = 0;
+
+  for (let i = orbs.length-1; i >= 0; i--){
+    const o = orbs[i];
+    o.vy += GRAV*dt; o.x += o.vx*dt; o.y += o.vy*dt; o.a += o.spin*dt;
+    if (o.y > H + 90 && o.vy > 0){ orbs.splice(i, 1); if (!o.bomb) combo = 0; }
+  }
+  for (let i = halves.length-1; i >= 0; i--){
+    const h = halves[i];
+    h.vy += GRAV*dt; h.x += h.vx*dt; h.y += h.vy*dt; h.rot += h.vr*dt; h.life -= dt*0.9;
+    if (h.life <= 0) halves.splice(i, 1);
+  }
+  for (let i = parts.length-1; i >= 0; i--){
+    const p = parts[i];
+    p.vy += GRAV*0.5*dt; p.x += p.vx*dt; p.y += p.vy*dt; p.life -= dt;
+    if (p.life <= 0) parts.splice(i, 1);
+  }
+  for (let i = pops.length-1; i >= 0; i--){
+    const p = pops[i]; p.y -= 60*dt; p.life -= dt*1.2;
+    if (p.life <= 0) pops.splice(i, 1);
+  }
+  shake = Math.max(0, shake - 60*dt); flash = Math.max(0, flash - 3*dt);
+
+  // draw
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+  bg();
+  for (const h of halves) drawHalf(h);
+  for (const o of orbs) drawOrb(o);
+  ctx.shadowBlur = 0;
+  for (const p of parts){
+    ctx.globalAlpha = Math.max(0, p.life*1.6);
+    ctx.fillStyle = p.hue ? `hsl(${p.hue} 100% 70%)` : '#ff8a5c';
+    ctx.fillRect(p.x-2, p.y-2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+  drawTrail(now);
+  for (const p of pops){
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.font = 'bold 26px system-ui'; ctx.textAlign = 'center';
+    ctx.fillStyle = p.col; ctx.shadowColor = p.col; ctx.shadowBlur = 12;
+    ctx.fillText(p.txt, p.x, p.y);
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+  if (flash > 0){ ctx.fillStyle = `rgba(255,40,80,${flash*0.35})`; ctx.fillRect(0, 0, W, H); }
+
+  scoreEl.textContent = score;
+  comboEl.textContent = combo > 1 ? `COMBO ×${combo}` : '';
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

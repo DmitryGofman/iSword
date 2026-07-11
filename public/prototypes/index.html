@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iSword — Slicing Prototypes</title>
+<style>
+  html,body{margin:0;min-height:100%;background:#0a0a14;color:#e8ecf4;
+    font-family:system-ui,-apple-system,sans-serif}
+  main{max-width:780px;margin:0 auto;padding:40px 20px 60px}
+  h1{font-size:26px;margin:0 0 6px}
+  p.lead{color:#8b93ab;margin:0 0 30px;line-height:1.5}
+  a.card{display:block;text-decoration:none;color:inherit;border-radius:14px;
+    padding:18px 20px;margin:14px 0;border:1px solid rgba(255,255,255,.09);
+    background:linear-gradient(120deg,rgba(255,255,255,.045),rgba(255,255,255,.015));
+    transition:transform .12s, border-color .12s}
+  a.card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.25)}
+  .card h2{margin:0 0 4px;font-size:18px}
+  .card p{margin:0;color:#8b93ab;font-size:14px;line-height:1.45}
+  .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;
+    padding:2px 8px;border-radius:20px;margin-left:8px;vertical-align:2px}
+  .t1{background:#0e3d4a;color:#37e6ff}.t2{background:#2c1450;color:#b26bff}
+  .t3{background:#463c2a;color:#e8d5a0}.t4{background:#4a1e0e;color:#ff9c53}
+  footer{color:#5b6178;font-size:13px;margin-top:34px;line-height:1.5}
+</style>
+</head>
+<body>
+<main>
+  <h1>🗡️ iSword — Slicing Prototypes</h1>
+  <p class="lead">Four takes on <strong>one</strong> game: slice flying spheres for score.
+    Same core verb, different mechanic emphasis and art direction. All mouse/touch-driven —
+    the swipe is a stand-in for the phone-IMU swing (direction + speed), so what feels good
+    here with a swipe is what will feel good with the real sword.</p>
+
+  <a class="card" href="proto-1-neon-arcade.html">
+    <h2>1 · Neon Arcade Slicer <span class="tag t1">BASELINE</span></h2>
+    <p>Fruit-Ninja read: orbs lobbed up with gravity, slice for combo multipliers, avoid mines.
+       Tests the pure arcade loop — is "slash the thing" fun by itself?</p>
+  </a>
+
+  <a class="card" href="proto-2-blade-corridor.html">
+    <h2>2 · Blade Corridor <span class="tag t2">DIRECTIONAL</span></h2>
+    <p>Orbs fly at you down a synthwave corridor and each demands a cut <em>in a marked direction</em>
+       inside a timing window. The Beat-Saber read — this maps 1:1 onto what the IMU measures best.</p>
+  </a>
+
+  <a class="card" href="proto-3-zen-ink.html">
+    <h2>3 · Zen Ink Dojo <span class="tag t3">TIMING</span></h2>
+    <p>Sumi-e ink-and-paper style. A ring closes on each orb; cut exactly when it touches for a
+       PERFECT and a red seal stamp. Timing over flailing — the iaijutsu read, and the most
+       latency-tolerant.</p>
+  </a>
+
+  <a class="card" href="proto-4-sphere-storm.html">
+    <h2>4 · Sphere Storm <span class="tag t4">SURVIVAL</span></h2>
+    <p>Defend the core: the storm converges from all sides, waves escalate, kills fill a FEVER
+       slow-mo meter. Hit-stop, screen shake, game over, restart — the full arcade juice stack.</p>
+  </a>
+
+  <footer>
+    Each file is fully self-contained (no dependencies). Open on a phone or desktop.<br>
+    Pick the one that feels best with a swipe — then wire it to the IMU stream from
+    <code>controller.js</code> by mapping swing direction → cut direction and angular speed → slice power.
+  </footer>
+</main>
+</body>
+</html>

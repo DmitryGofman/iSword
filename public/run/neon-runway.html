@@ -505,16 +505,51 @@ function makeQR(url){
   else{const s=document.createElement('script');s.src='../vendor/qrcode.min.js';
     s.onload=go;s.onerror=()=>{};document.head.appendChild(s);}
 }
+// The visible blade: grip anchored just off the bottom of the screen (first-
+// person), the tip reaching to where you aim, so you SEE the sword sweep across
+// the blobs — same look as the Control Lab, drawn in 2D.
+function bladeTip(now){
+  if(swordActive()&&now-sword.lastMsg<800) return {x:sword.x,y:sword.y,active:sword.swinging};
+  if(down&&trail.length) {const p=trail[trail.length-1];return {x:p.x,y:p.y,active:true};}
+  return null;                            // finger up & no IMU: nothing held
+}
 function drawSword(now){
-  if(now-sword.lastMsg>800)return;       // no fresh IMU: hide the reticle
-  ctx.save();ctx.translate(sword.x,sword.y);
-  const act=sword.swinging;
-  ctx.shadowColor='#37e6ff';ctx.shadowBlur=act?28:14;
-  ctx.strokeStyle=act?'#fff':'#37e6ff';ctx.lineWidth=act?3:2;
-  ctx.beginPath();ctx.arc(0,0,act?16:11,0,7);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(-22,0);ctx.lineTo(-8,0);ctx.moveTo(8,0);ctx.lineTo(22,0);
-  ctx.moveTo(0,-22);ctx.lineTo(0,-8);ctx.moveTo(0,8);ctx.lineTo(0,22);ctx.stroke();
+  const t=bladeTip(now);if(!t)return;
+  drawBlade(t.x,t.y,t.active);
+}
+function drawBlade(tx,ty,active){
+  const hx=CX,hy=H+30;                    // the hand: just below the screen
+  let dx=tx-hx,dy=ty-hy,L=Math.hypot(dx,dy);
+  if(L<150){const k=150/(L||1);dx*=k;dy*=k;L=150;}
+  const ang=Math.atan2(dy,dx);
+  ctx.save();ctx.translate(hx,hy);ctx.rotate(ang); // +x now runs hand→tip
+  ctx.lineJoin='round';ctx.lineCap='round';
+  const bw=active?9:7,bx=32,tipBase=L-18;
+  // steel blade
+  ctx.shadowColor='#37e6ff';ctx.shadowBlur=active?26:13;
+  const g=ctx.createLinearGradient(bx,0,L,0);
+  g.addColorStop(0,'#9fbdd6');g.addColorStop(0.5,'#eaf6ff');g.addColorStop(1,'#cfe8ff');
+  ctx.fillStyle=g;
+  ctx.beginPath();
+  ctx.moveTo(bx,-bw);ctx.lineTo(tipBase,-bw*0.7);ctx.lineTo(L,0);
+  ctx.lineTo(tipBase,bw*0.7);ctx.lineTo(bx,bw);ctx.closePath();ctx.fill();
+  // fuller + active edge glint
+  ctx.shadowBlur=0;
+  ctx.strokeStyle='rgba(120,160,200,.7)';ctx.lineWidth=1.4;
+  ctx.beginPath();ctx.moveTo(bx+2,0);ctx.lineTo(tipBase,0);ctx.stroke();
+  if(active){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.shadowColor='#fff';ctx.shadowBlur=16;
+    ctx.beginPath();ctx.moveTo(bx,-bw);ctx.lineTo(L,0);ctx.stroke();ctx.shadowBlur=0;}
+  // gold guard
+  ctx.fillStyle='#ffd23c';ctx.shadowColor='#ffb300';ctx.shadowBlur=active?12:6;
+  ctx.fillRect(24,-17,8,34);
+  // grip + pommel
+  ctx.shadowBlur=0;ctx.fillStyle='#2a2038';ctx.fillRect(-2,-6,27,12);
+  ctx.fillStyle='#4a3a63';ctx.beginPath();ctx.arc(-2,0,7,0,7);ctx.fill();
   ctx.restore();
+  // tip spark so the exact cut point reads
+  ctx.save();ctx.shadowColor='#37e6ff';ctx.shadowBlur=active?20:10;
+  ctx.fillStyle=active?'#fff':'#bfefff';
+  ctx.beginPath();ctx.arc(tx,ty,active?5:3.5,0,7);ctx.fill();ctx.restore();
 }
 
 reset();

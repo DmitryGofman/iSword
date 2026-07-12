@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+<link rel="icon" href="../favicon.svg">
 <title>iSword RUN — Neon Runway</title>
 <style>
   html,body{margin:0;height:100%;overflow:hidden;background:#07070f;touch-action:none;
@@ -25,6 +26,21 @@
   .shop button:disabled{opacity:.42}
   #again{background:#37e6ff;color:#06131a;border:0;border-radius:14px;padding:13px 34px;
     font-size:17px;font-weight:800;cursor:pointer;box-shadow:0 0 24px #37e6ff66}
+  #swordBtn{position:fixed;bottom:46px;right:14px;background:#141430;color:#e8f6ff;
+    border:1px solid #37e6ff66;border-radius:22px;padding:9px 16px;font-size:14px;
+    font-weight:700;cursor:pointer;box-shadow:0 0 14px #37e6ff33;z-index:5}
+  #swordBtn.on{border-color:#7dff8a;color:#7dff8a;box-shadow:0 0 14px #7dff8a44}
+  #swordOv{position:fixed;inset:0;display:none;place-items:center;background:rgba(5,5,15,.9);z-index:20}
+  #swordOv .box{background:#10102a;border:1px solid #37e6ff44;border-radius:18px;
+    padding:26px 30px;text-align:center;color:#e8f6ff;max-width:400px}
+  #swordOv h2{margin:0 0 6px;font-size:20px}
+  #swCode{font-size:42px;font-weight:800;letter-spacing:.35em;color:#37e6ff;
+    text-shadow:0 0 18px #37e6ff;margin:6px 0 12px}
+  #swQr{display:inline-block;background:#fff;padding:10px;border-radius:10px;min-width:132px;min-height:132px}
+  #swUrl{color:#7f8db0;font-size:12px;margin:10px 0 4px;word-break:break-all}
+  #swStatus{color:#ffd23c;font-size:14px;font-weight:600;min-height:20px;margin-top:8px}
+  #swClose{margin-top:14px;background:none;border:1px solid #7f8db066;color:#9fb0d0;
+    border-radius:10px;padding:7px 18px;font-size:13px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -35,6 +51,16 @@
   <div style="text-align:right;color:#7f8db0;font-size:12.5px">RUN A<br><b>NEON RUNWAY</b></div>
 </div>
 <div id="hint"><b>Slice the green blobs</b> for score &amp; coins · <b style="color:#ff5c7a">cut the red gates</b> before they hit you · never touch the <b style="color:#c07aff">violet mines</b></div>
+<button id="swordBtn">🗡️ Phone Sword</button>
+<div id="swordOv"><div class="box">
+  <h2>⚔️ Pair your phone sword</h2>
+  <div>On your phone, open the controller and enter:</div>
+  <div id="swCode">····</div>
+  <div id="swQr"></div>
+  <div id="swUrl"></div>
+  <div id="swStatus">Starting…</div>
+  <button id="swClose">close</button>
+</div></div>
 <div id="over"><div>
   <h1>RUN OVER</h1>
   <div class="stats" id="stats"></div>
@@ -123,19 +149,26 @@ addEventListener('pointermove',e=>{
   if(!q)return;
   const dt=Math.max(1,p.t-q.t),dx=p.x-q.x,dy=p.y-q.y;
   if(Math.hypot(dx,dy)/dt*1000<320)return;
+  sliceAt(q.x,q.y,p.x,p.y,dx,dy);
+});
+// One slice segment against every near entity — shared by touch swipes and the IMU sword.
+function sliceAt(qx,qy,px,py,dx,dy){
   const reach=8+save.up.blade*7;
+  let hits=0;
   for(let i=ents.length-1;i>=0;i--){
     const o=ents[i];if(o.z>NEAR)continue;
     const pr=proj(o.lane,Math.max(0.02,o.z),o.alt+(o.bob?Math.sin(perfNow*0.004+o.bob)*10:0));
     const rr=o.kind==='gate'?W*0.34:pr.s*o.r;
-    if(segCircle(q.x,q.y,p.x,p.y,pr.x,pr.y,rr+reach)){
+    if(segCircle(qx,qy,px,py,pr.x,pr.y,rr+reach)){
+      hits++;
       if(o.kind==='blob'){ents.splice(i,1);cutBlob(o,pr,dx,dy);}
       else if(o.kind==='gate'){ents.splice(i,1);cutGate(pr,dx,dy);}
       else if(o.kind==='mine'){ents.splice(i,1);hitMine(pr);}
       else if(o.kind==='coin'){ents.splice(i,1);grabCoin(pr,1);}
     }
   }
-});
+  return hits;
+}
 function segCircle(x1,y1,x2,y2,cx,cy,r){
   const dx=x2-x1,dy=y2-y1,l2=dx*dx+dy*dy;
   let t=l2?((cx-x1)*dx+(cy-y1)*dy)/l2:0;t=Math.max(0,Math.min(1,t));
@@ -178,8 +211,10 @@ function loseHeart(why){
 function die(){
   dead=true;save.wallet+=coinsRun;persist();
   statsEl.innerHTML=`distance <b style="color:#37e6ff">${Math.round(dist)}m</b> · blobs cut <b>${kills}</b><br>`+
-    `coins this run <b style="color:#ffd23c">🪙 ${coinsRun}</b> · wallet <b style="color:#ffd23c">🪙 ${save.wallet}</b>`;
+    `coins this run <b style="color:#ffd23c">🪙 ${coinsRun}</b> · wallet <b style="color:#ffd23c">🪙 ${save.wallet}</b>`+
+    (sword.connected?'<br><span style="color:#7dff8a">tap your phone to run again</span>':'');
   renderShop();overEl.style.display='grid';
+  if(sword.net&&sword.connected)sword.net.send({t:'haptic',ms:220});
 }
 function renderShop(){
   shopEl.innerHTML='';
@@ -278,6 +313,135 @@ function drawTrail(now){
   ctx.restore();
 }
 
+// ================= PHONE SWORD (IMU over the WebSocket relay) =================
+// The phone runs the stock /controller.html: it streams {t:'imu', o:[α,β,γ],
+// orient, rot} at 60Hz, sends {t:'calibrate'} / {t:'stab'}, and vibrates on
+// {t:'haptic'}. Here we map the blade's orientation to a screen cursor and gate
+// slicing on real angular speed, feeding the same trail + sliceAt() as touch.
+const QP=new URLSearchParams(location.search);
+const WS_URL=QP.get('ws')||((location.protocol==='https:'?'wss':'ws')+'://'+location.host);
+const sword={net:null,code:null,connected:false,x:0,y:0,az0:0,el0:0,hasCal:false,
+  speed:0,swinging:false,lastMsg:0,fails:0,cuts:0};
+window.__sword=sword; // debug hook
+
+function makeCode(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';
+  for(let i=0;i<4;i++)s+=A[(Math.random()*A.length)|0];return s;}
+
+class NetMini{ // minimal reconnecting client speaking server.js's room protocol
+  constructor(o){this.o=o;this.joined=false;this.backoff=500;this.connect();}
+  connect(){this.o.onStatus('connecting');
+    let ws;try{ws=new WebSocket(WS_URL);}catch(e){this.retry();return;}
+    this.ws=ws;
+    ws.onopen=()=>{this.backoff=500;this.send({t:'join',role:'game',room:this.o.room});};
+    ws.onmessage=ev=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}
+      if(m.t==='joined'){this.joined=true;this.o.onStatus('joined');}
+      this.o.onMessage(m);};
+    ws.onclose=()=>{this.joined=false;this.o.onStatus('disconnected');this.retry();};
+    ws.onerror=()=>{try{ws.close();}catch(e){}};}
+  retry(){const d=Math.min(this.backoff,8000);this.backoff=Math.min(this.backoff*2,8000);
+    setTimeout(()=>this.connect(),d);}
+  send(o){if(this.ws&&this.ws.readyState===1){this.ws.send(JSON.stringify(o));return true;}return false;}
+}
+
+// Device orientation -> world quaternion (same YXZ + screen-orient math as game.js).
+function qmul(a,b){return[
+  a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1],
+  a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],
+  a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3],
+  a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2]];}
+function qYXZ(x,y,z){const c1=Math.cos(x/2),c2=Math.cos(y/2),c3=Math.cos(z/2),
+  s1=Math.sin(x/2),s2=Math.sin(y/2),s3=Math.sin(z/2);
+  return[s1*c2*c3+c1*s2*s3,c1*s2*c3-s1*c2*s3,c1*c2*s3-s1*s2*c3,c1*c2*c3+s1*s2*s3];}
+const Q1=[-Math.SQRT1_2,0,0,Math.SQRT1_2];
+function bladeVec(al,be,ga,orient){ // where the phone's top edge points, in world space
+  let q=qmul(qYXZ(be,al,-ga),Q1);
+  if(orient)q=qmul(q,[0,0,Math.sin(-orient/2),Math.cos(-orient/2)]);
+  const[x,y,z,w]=q;
+  return[2*(x*y-w*z),1-2*(x*x+z*z),2*(y*z+w*x)]; // q * (0,1,0)
+}
+function wrapPi(a){while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a;}
+
+const SWING_ON=240,SWING_OFF=140;       // deg/s hysteresis: a flick slices, drift doesn't
+function onIMU(m){
+  const v=bladeVec(m.o[0],m.o[1],m.o[2],m.orient||0);
+  const az=Math.atan2(-v[0],-v[2]),el=Math.asin(Math.max(-1,Math.min(1,v[1])));
+  if(!sword.hasCal){sword.az0=az;sword.el0=el;sword.hasCal=true;}
+  const K=W*0.85;                        // rad -> px: ±~35° of wrist covers the screen
+  sword.x=Math.max(-40,Math.min(W+40,CX-wrapPi(az-sword.az0)*K));
+  sword.y=Math.max(-40,Math.min(H+40,H*0.6-(el-sword.el0)*K));
+  sword.speed=m.rot?Math.hypot(m.rot[0],m.rot[1],m.rot[2]):0;
+  sword.lastMsg=performance.now();
+  const wasSwing=sword.swinging;
+  if(sword.speed>SWING_ON)sword.swinging=true;
+  else if(sword.speed<SWING_OFF)sword.swinging=false;
+  if(sword.swinging&&!dead){
+    if(!wasSwing)trail.length=0;         // fresh slash, don't join stale points
+    const p={x:sword.x,y:sword.y,t:sword.lastMsg},q2=trail[trail.length-1];
+    trail.push(p);
+    if(q2){
+      const hits=sliceAt(q2.x,q2.y,p.x,p.y,p.x-q2.x,p.y-q2.y);
+      if(hits){sword.cuts+=hits;
+        if(sword.net)sword.net.send({t:'haptic',ms:Math.min(80,25+hits*15)});}
+    }
+  }
+}
+function onSwordMsg(m){
+  if(m.t==='imu')onIMU(m);
+  else if(m.t==='calibrate')sword.hasCal=false;   // re-zero on the next sample
+  else if(m.t==='stab'){if(dead)reset();}
+  else if(m.t==='presence'&&m.role==='controller'){
+    const was=sword.connected;
+    sword.connected=m.count>0;
+    swordBtn.classList.toggle('on',sword.connected);
+    swordBtn.textContent=sword.connected?'⚔️ Sword linked':'🗡️ Phone Sword';
+    if(sword.connected){
+      swStatus.textContent='⚔️ Connected! Hold the phone like a grip, tap Calibrate, then swing.';
+      setTimeout(()=>{if(sword.connected)swordOv.style.display='none';},1800);
+    }else swStatus.textContent=was
+      ?'Phone disconnected — rejoin with the code.'
+      :'Waiting for your phone…';
+  }
+}
+const swordBtn=document.getElementById('swordBtn'),swordOv=document.getElementById('swordOv'),
+      swCode=document.getElementById('swCode'),swQr=document.getElementById('swQr'),
+      swUrl=document.getElementById('swUrl'),swStatus=document.getElementById('swStatus');
+swordBtn.onclick=()=>{
+  swordOv.style.display='grid';
+  if(sword.net)return;
+  sword.code=makeCode();
+  swCode.textContent=sword.code;
+  const url=new URL('../controller.html?room='+sword.code,location.href).href;
+  swUrl.textContent=url.replace(/^https?:\/\//,'');
+  makeQR(url);
+  sword.net=new NetMini({room:sword.code,onMessage:onSwordMsg,onStatus:st=>{
+    if(st==='joined'){if(!sword.connected)swStatus.textContent='Waiting for your phone…';sword.fails=0;}
+    else if(st==='disconnected'){sword.fails++;
+      swStatus.textContent=sword.fails>2
+        ?'No relay reachable. The sword needs the Node server (npm start) — GitHub Pages can\'t relay motion.'
+        :'Connecting to relay…';}
+  }});
+};
+document.getElementById('swClose').onclick=()=>{swordOv.style.display='none';};
+function makeQR(url){
+  swQr.innerHTML='';
+  const go=()=>{try{new window.QRCode(swQr,{text:url,width:132,height:132,
+    colorDark:'#0a0d17',colorLight:'#ffffff',correctLevel:window.QRCode.CorrectLevel.M});}catch(e){}};
+  if(window.QRCode)go();
+  else{const s=document.createElement('script');s.src='../vendor/qrcode.min.js';
+    s.onload=go;s.onerror=()=>{};document.head.appendChild(s);}
+}
+function drawSword(now){
+  if(now-sword.lastMsg>800)return;       // no fresh IMU: hide the reticle
+  ctx.save();ctx.translate(sword.x,sword.y);
+  const act=sword.swinging;
+  ctx.shadowColor='#37e6ff';ctx.shadowBlur=act?28:14;
+  ctx.strokeStyle=act?'#fff':'#37e6ff';ctx.lineWidth=act?3:2;
+  ctx.beginPath();ctx.arc(0,0,act?16:11,0,7);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(-22,0);ctx.lineTo(-8,0);ctx.moveTo(8,0);ctx.lineTo(22,0);
+  ctx.moveTo(0,-22);ctx.lineTo(0,-8);ctx.moveTo(0,8);ctx.lineTo(0,22);ctx.stroke();
+  ctx.restore();
+}
+
 reset();
 let last=performance.now(),perfNow=last;
 function frame(now){
@@ -317,6 +481,7 @@ function frame(now){
   for(const p of parts){ctx.globalAlpha=Math.max(0,p.life*1.8);ctx.fillStyle=p.col;ctx.fillRect(p.x-2,p.y-2,4,4);}
   ctx.globalAlpha=1;
   drawTrail(now);
+  drawSword(now);
   // coins flying to HUD
   const tx=CX,ty=26;
   for(const c of coinsFly){

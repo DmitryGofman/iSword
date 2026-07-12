@@ -41,6 +41,17 @@
   #swStatus{color:#ffd23c;font-size:14px;font-weight:600;min-height:20px;margin-top:8px}
   #swClose{margin-top:14px;background:none;border:1px solid #7f8db066;color:#9fb0d0;
     border-radius:10px;padding:7px 18px;font-size:13px;cursor:pointer}
+  #swLocalBtn{width:100%;background:#37e6ff;color:#06131a;border:0;border-radius:12px;
+    padding:14px;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 0 20px #37e6ff55}
+  #swLocalHint{color:#9fb0d0;font-size:12.5px;margin:9px 2px 0;line-height:1.45}
+  #swLocalErr{color:#ff5c7a;font-size:12.5px;margin-top:8px;min-height:0}
+  .swOr{color:#5b6480;font-size:11.5px;letter-spacing:.06em;margin:16px 0 9px;text-transform:uppercase}
+  #swPairBtn{background:#141430;color:#9fb0d0;border:1px solid #7f8db044;border-radius:11px;
+    padding:9px 16px;font-size:13px;cursor:pointer}
+  #swPair{display:none;margin-top:12px}
+  #recenterBtn{position:fixed;bottom:46px;left:14px;display:none;background:#141430;color:#37e6ff;
+    border:1px solid #37e6ff66;border-radius:22px;padding:9px 15px;font-size:13px;font-weight:700;
+    cursor:pointer;box-shadow:0 0 12px #37e6ff33;z-index:5}
 </style>
 </head>
 <body>
@@ -50,15 +61,23 @@
   <div style="text-align:center"><div id="coins">🪙 0</div><div id="hearts"></div></div>
   <div style="text-align:right;color:#7f8db0;font-size:12.5px">RUN A<br><b>NEON RUNWAY</b></div>
 </div>
-<div id="hint"><b>Slice the green blobs</b> for score &amp; coins · <b style="color:#ff5c7a">cut the red gates</b> before they hit you · never touch the <b style="color:#c07aff">violet mines</b></div>
+<div id="hint">Swipe with your finger — or tap <b>🗡️ Phone Sword</b> to swing your phone. <b>Slice the green blobs</b> for coins · <b style="color:#ff5c7a">cut the red gates</b> · avoid the <b style="color:#c07aff">violet mines</b></div>
 <button id="swordBtn">🗡️ Phone Sword</button>
+<button id="recenterBtn">⟳ Recenter</button>
 <div id="swordOv"><div class="box">
-  <h2>⚔️ Pair your phone sword</h2>
-  <div>On your phone, open the controller and enter:</div>
-  <div id="swCode">····</div>
-  <div id="swQr"></div>
-  <div id="swUrl"></div>
-  <div id="swStatus">Starting…</div>
+  <h2>⚔️ Cut with your phone as the sword</h2>
+  <button id="swLocalBtn">🗡️ Use THIS phone as the sword</button>
+  <div id="swLocalHint">Hold the phone upright like a grip, allow <b>Motion</b> access, then <b>swing it</b> to slice the blobs. No setup — plays right here.</div>
+  <div id="swLocalErr"></div>
+  <div class="swOr">— or, playing on a TV / big screen —</div>
+  <button id="swPairBtn">📺 Pair a second phone</button>
+  <div id="swPair">
+    <div style="margin-bottom:6px">On the phone, open the controller and enter:</div>
+    <div id="swCode">····</div>
+    <div id="swQr"></div>
+    <div id="swUrl"></div>
+    <div id="swStatus">Starting…</div>
+  </div>
   <button id="swClose">close</button>
 </div></div>
 <div id="over"><div>
@@ -212,9 +231,9 @@ function die(){
   dead=true;save.wallet+=coinsRun;persist();
   statsEl.innerHTML=`distance <b style="color:#37e6ff">${Math.round(dist)}m</b> · blobs cut <b>${kills}</b><br>`+
     `coins this run <b style="color:#ffd23c">🪙 ${coinsRun}</b> · wallet <b style="color:#ffd23c">🪙 ${save.wallet}</b>`+
-    (sword.connected?'<br><span style="color:#7dff8a">tap your phone to run again</span>':'');
+    (swordActive()?'<br><span style="color:#7dff8a">swing your sword to run again</span>':'');
   renderShop();overEl.style.display='grid';
-  if(sword.net&&sword.connected)sword.net.send({t:'haptic',ms:220});
+  buzz(220);
 }
 function renderShop(){
   shopEl.innerHTML='';
@@ -320,9 +339,14 @@ function drawTrail(now){
 // slicing on real angular speed, feeding the same trail + sliceAt() as touch.
 const QP=new URLSearchParams(location.search);
 const WS_URL=QP.get('ws')||((location.protocol==='https:'?'wss':'ws')+'://'+location.host);
-const sword={net:null,code:null,connected:false,x:0,y:0,az0:0,el0:0,hasCal:false,
+const sword={net:null,code:null,connected:false,local:false,x:0,y:0,az0:0,el0:0,hasCal:false,
   speed:0,swinging:false,lastMsg:0,fails:0,cuts:0};
 window.__sword=sword; // debug hook
+function swordActive(){return sword.connected||sword.local;}
+function buzz(ms){ // haptics: through the relay for a paired phone, or this device directly
+  if(sword.net&&sword.connected)sword.net.send({t:'haptic',ms});
+  else if(sword.local&&navigator.vibrate)navigator.vibrate(ms);
+}
 
 function makeCode(){const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';
   for(let i=0;i<4;i++)s+=A[(Math.random()*A.length)|0];return s;}
@@ -374,16 +398,61 @@ function onIMU(m){
   const wasSwing=sword.swinging;
   if(sword.speed>SWING_ON)sword.swinging=true;
   else if(sword.speed<SWING_OFF)sword.swinging=false;
+  if(sword.swinging&&!wasSwing&&dead){reset();return;} // swing to run again
   if(sword.swinging&&!dead){
     if(!wasSwing)trail.length=0;         // fresh slash, don't join stale points
     const p={x:sword.x,y:sword.y,t:sword.lastMsg},q2=trail[trail.length-1];
     trail.push(p);
     if(q2){
       const hits=sliceAt(q2.x,q2.y,p.x,p.y,p.x-q2.x,p.y-q2.y);
-      if(hits){sword.cuts+=hits;
-        if(sword.net)sword.net.send({t:'haptic',ms:Math.min(80,25+hits*15)});}
+      if(hits){sword.cuts+=hits;buzz(Math.min(80,25+hits*15));}
     }
   }
+}
+// ---- Direct on-device sword: read THIS phone's IMU, no relay (works on Pages) ----
+const localIMU={o:[0,0,0],orient:0,rot:[0,0,0]};
+function screenAngleRad(){
+  const so=(screen.orientation&&typeof screen.orientation.angle==='number')
+    ?screen.orientation.angle:(window.orientation||0);
+  return(so||0)*Math.PI/180;
+}
+function onLocalOrient(e){
+  if(e.alpha==null&&e.beta==null&&e.gamma==null)return;
+  localIMU.o[0]=(e.alpha||0)*Math.PI/180;
+  localIMU.o[1]=(e.beta||0)*Math.PI/180;
+  localIMU.o[2]=(e.gamma||0)*Math.PI/180;
+  localIMU.orient=screenAngleRad();
+}
+function onLocalMotion(e){
+  const r=e.rotationRate;
+  if(r)localIMU.rot=[r.alpha||0,r.beta||0,r.gamma||0];
+  if(sword.local)onIMU(localIMU);       // drive one combined sample per motion tick (~60Hz)
+}
+async function requestMotionPerm(){
+  const needO=typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function';
+  const needM=typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function';
+  if(needO){const r=await DeviceOrientationEvent.requestPermission();if(r!=='granted')throw 0;}
+  if(needM){const r=await DeviceMotionEvent.requestPermission();if(r!=='granted')throw 0;}
+}
+async function startLocalSword(){
+  swLocalErr.textContent='';
+  if(typeof DeviceOrientationEvent==='undefined'){
+    swLocalErr.textContent='This device has no motion sensors. Use finger-swipe, or open on a phone.';return;}
+  try{await requestMotionPerm();}
+  catch(e){swLocalErr.textContent='Motion access denied. Enable it in Settings → Safari → Motion, then retry.';return;}
+  window.addEventListener('deviceorientation',onLocalOrient,true);
+  window.addEventListener('devicemotion',onLocalMotion,true);
+  sword.local=true;sword.hasCal=false;
+  swordBtn.classList.add('on');swordBtn.textContent='⚔️ Sword active';
+  recenterBtn.style.display='block';
+  swordOv.style.display='none';
+  setHintOnce('⚔️ Swing your phone to cut · ⟳ Recenter if the aim drifts');
+}
+let hintTimer=null;
+function setHintOnce(txt){
+  const h=document.getElementById('hint'),prev=h.innerHTML;
+  h.innerHTML=txt;clearTimeout(hintTimer);
+  hintTimer=setTimeout(()=>{h.innerHTML=prev;},4200);
 }
 function onSwordMsg(m){
   if(m.t==='imu')onIMU(m);
@@ -404,9 +473,15 @@ function onSwordMsg(m){
 }
 const swordBtn=document.getElementById('swordBtn'),swordOv=document.getElementById('swordOv'),
       swCode=document.getElementById('swCode'),swQr=document.getElementById('swQr'),
-      swUrl=document.getElementById('swUrl'),swStatus=document.getElementById('swStatus');
-swordBtn.onclick=()=>{
-  swordOv.style.display='grid';
+      swUrl=document.getElementById('swUrl'),swStatus=document.getElementById('swStatus'),
+      swLocalBtn=document.getElementById('swLocalBtn'),swLocalErr=document.getElementById('swLocalErr'),
+      swPairBtn=document.getElementById('swPairBtn'),swPair=document.getElementById('swPair'),
+      recenterBtn=document.getElementById('recenterBtn');
+swordBtn.onclick=()=>{ swordOv.style.display='grid'; };
+swLocalBtn.onclick=()=>startLocalSword();
+recenterBtn.onclick=()=>{sword.hasCal=false;setHintOnce('⟳ Recentered — point the phone where you want the blade');};
+swPairBtn.onclick=()=>{
+  swPair.style.display='block';swPairBtn.style.display='none';
   if(sword.net)return;
   sword.code=makeCode();
   swCode.textContent=sword.code;
@@ -417,7 +492,7 @@ swordBtn.onclick=()=>{
     if(st==='joined'){if(!sword.connected)swStatus.textContent='Waiting for your phone…';sword.fails=0;}
     else if(st==='disconnected'){sword.fails++;
       swStatus.textContent=sword.fails>2
-        ?'No relay reachable. The sword needs the Node server (npm start) — GitHub Pages can\'t relay motion.'
+        ?'No relay reachable. Pairing needs the Node server (npm start) — GitHub Pages can\'t relay. Use “this phone” above instead.'
         :'Connecting to relay…';}
   }});
 };

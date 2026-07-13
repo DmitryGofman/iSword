@@ -22,6 +22,11 @@
     padding:2px 8px;border-radius:20px;margin-left:8px;vertical-align:2px}
   .ta{background:#0e3d4a;color:#37e6ff}.tb{background:#463c2a;color:#e8d5a0}
   .tc{background:#0e3d33;color:#2fffc4}.td{background:#4a2a0e;color:#ffb36b}
+  .te{background:#33304a;color:#b9b2ff}
+  .divider{display:flex;align-items:center;gap:12px;color:#5b6178;font-size:12px;
+    letter-spacing:.1em;text-transform:uppercase;margin:30px 0 6px}
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:rgba(255,255,255,.09)}
+  a.card.alt{background:linear-gradient(120deg,rgba(150,140,255,.07),rgba(255,255,255,.012))}
   footer{color:#5b6178;font-size:13px;margin-top:32px;line-height:1.55}
   footer a{color:#8b93ab}
 </style>
@@ -59,10 +64,24 @@
        pulse for ×2. Grazing near-misses charges DASH: invincible, triple score, sky on fire.</p>
   </a>
 
+  <div class="divider">the previous version &amp; the sword lab</div>
+
+  <a class="card alt" href="../game.html">
+    <h2>🏛️ Classic Arena <span class="tag te">PREVIOUS VERSION</span></h2>
+    <p>The original iSword: a real 3D sword you swing with your phone to fight a reactive training dummy —
+       swings, blocks, parries, combos, the full three.js arena. This is the build the runner grew out of.
+       (Pair a phone via room code / QR, or click <b>Try with mouse</b>.)</p>
+  </a>
+
+  <a class="card alt" href="../testsword/">
+    <h2>🧪 Control Lab <span class="tag te">SWORD TEST LAB</span></h2>
+    <p>The mechanics test-ground for the sword itself: swap IMU control modes (absolute, smoothed, springy,
+       rate, nudge), tune deadzone / sensitivity / stiffness, toggle hitboxes, a dummy, or a 2nd blade to clash with.</p>
+  </a>
+
   <footer>
-    Every world has the full loop: distance score · money that persists · upgrade shop · hearts · death &amp; restart.<br>
-    Also here: <a href="../testsword/">🧪 Control Lab</a> · <a href="../game.html">classic training arena</a> ·
-    <a href="../prototypes/">round-1 mechanic studies</a>
+    Every world above has the full loop: distance score · money that persists · upgrade shop · hearts · death &amp; restart.<br>
+    Also: <a href="../prototypes/">round-1 mechanic studies</a> · <a href="../">main menu</a>
   </footer>
 </main>
 </body>

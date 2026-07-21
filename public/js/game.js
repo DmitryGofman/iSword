@@ -2060,7 +2060,9 @@ function selectSword(id) {
 document.querySelectorAll('.mode-opt').forEach((el) => el.addEventListener('click', () => selectMode(el.dataset.mode)));
 document.querySelectorAll('.skin-opt').forEach((el) => el.addEventListener('click', () => selectSkin(el.dataset.skin)));
 document.querySelectorAll('.sword-opt').forEach((el) => el.addEventListener('click', () => selectSword(el.dataset.sword)));
-selectMode('free');
+const MODE_IDS = ['free', 'rush', 'duel', 'drones', 'idle'];
+const wantMode = params.get('game');
+selectMode(MODE_IDS.includes(wantMode) ? wantMode : 'free');
 selectSkin('oak');
 selectSword('classic');
 
@@ -2192,6 +2194,17 @@ mouseBtn.addEventListener('click', () => {
   setupMouse();
   enterArena();
   setHint('Move mouse to aim · move fast to strike · click to thrust');
+});
+
+// "Use THIS phone as the sword" — reload into the already-working solo IMU mode
+// (reads this device's own motion sensors, no relay server). Preserves any
+// chosen mode (duel / drones / …) across the reload.
+const soloBtn = $('soloBtn');
+if (soloBtn) soloBtn.addEventListener('click', () => {
+  const p = new URLSearchParams(location.search);
+  p.set('mode', 'local');
+  if (game.mode && game.mode !== 'free') p.set('game', game.mode);
+  location.search = p.toString();
 });
 
 if (LOCAL_MODE) {
